@@ -466,9 +466,12 @@ dependencies = [
 name = "defect-cli"
 version = "0.1.0"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "defect-acp",
  "defect-agent",
+ "defect-llm",
+ "futures",
  "tokio",
  "tracing",
  "tracing-subscriber",
