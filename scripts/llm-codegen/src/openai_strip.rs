@@ -129,7 +129,32 @@ pub fn strip_and_patch(raw: &str) -> Result<String> {
     //    去 required 之后 codegen 会投成 `Option<…FinishReason>`，符合实际。
     relax_stream_finish_reason(map)?;
 
-    // 8. 序列化回 YAML。
+    // 8. 删除若干已知会触发 toac codegen bug 的 `discriminator` 节点：
+    //    toac 对 `oneOf + discriminator` 响应不一致——content-part 类投成
+    //    `#[serde(untagged)]`（OK），而消息壳/数组 item 类投成
+    //    `#[serde(tag = "<field>")]`，结果序列化时把 Rust variant **类型名**
+    //    （如 `ChatCompletionRequestUserMessage`）注入 `<field>` 字段，
+    //    覆盖每个 variant struct 内部自带的真实 `<field>` 值，上游一律拒收。
+    //    删 discriminator 后 codegen 落到 untagged 路径，每个 variant 自带
+    //    的 `role` / `type` 字段保留下来，形态符合上游期望。
+    //
+    //    位置一：顶层 schema `ChatCompletionRequestMessage`
+    //    位置二：`ChatCompletionMessageToolCalls.items` 这个 inline oneOf
+    drop_discriminator_at(
+        map,
+        &[&["components", "schemas", "ChatCompletionRequestMessage"]],
+    )?;
+    drop_discriminator_at(
+        map,
+        &[&[
+            "components",
+            "schemas",
+            "ChatCompletionMessageToolCalls",
+            "items",
+        ]],
+    )?;
+
+    // 9. 序列化回 YAML。
     let out =
         serde_yaml::to_string(&spec).context("serialize stripped spec")?;
     Ok(out)
@@ -319,6 +344,27 @@ fn relax_stream_finish_reason(spec: &mut Mapping) -> Result<()> {
         return Ok(());
     };
     required.retain(|v| v.as_str() != Some("finish_reason"));
+    Ok(())
+}
+
+/// 在 spec 内某条路径的 mapping 节点上删 `discriminator` 字段。
+///
+/// 路径写法：`&["components", "schemas", "Foo", "items"]`，逐级 mapping 解引。
+/// 任意一级不是 mapping 或缺失，则按 no-op 跳过——上游 schema 形态变化时
+/// patch 自动失效，不会让 codegen 失败。
+fn drop_discriminator_at(spec: &mut Mapping, paths: &[&[&str]]) -> Result<()> {
+    for path in paths {
+        let mut cursor: Option<&mut Mapping> = Some(spec);
+        for segment in *path {
+            let Some(map) = cursor else { break };
+            cursor = map
+                .get_mut(Value::String((*segment).into()))
+                .and_then(Value::as_mapping_mut);
+        }
+        if let Some(map) = cursor {
+            map.remove(Value::String("discriminator".into()));
+        }
+    }
     Ok(())
 }
 

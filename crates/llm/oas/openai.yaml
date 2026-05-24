@@ -1567,8 +1567,6 @@ components:
         oneOf:
         - $ref: '#/components/schemas/ChatCompletionMessageToolCall'
         - $ref: '#/components/schemas/ChatCompletionMessageCustomToolCall'
-        discriminator:
-          propertyName: type
     CreateChatCompletionResponse:
       type: object
       description: Represents a chat completion response returned by model, based on the provided input.
@@ -1880,8 +1878,6 @@ components:
       - $ref: '#/components/schemas/ChatCompletionRequestAssistantMessage'
       - $ref: '#/components/schemas/ChatCompletionRequestToolMessage'
       - $ref: '#/components/schemas/ChatCompletionRequestFunctionMessage'
-      discriminator:
-        propertyName: role
     ChatCompletionRequestMessageContentPartAudio:
       type: object
       title: Audio content part

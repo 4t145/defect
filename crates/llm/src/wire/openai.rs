@@ -10,7 +10,7 @@
     clippy::large_enum_variant,
     clippy::enum_variant_names,
     dead_code,
-    unused_imports
+    unused_imports,
 )]
 
 /// # OpenAI API
@@ -59,8 +59,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionStreamResponseDeltaContent
-    {
+    for ChatCompletionStreamResponseDeltaContent {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionStreamResponseDeltaContent::ChatCompletionStreamResponseDeltaContentVariant1(
                 value,
@@ -68,8 +67,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionStreamResponseDeltaContent>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionStreamResponseDeltaContent;
         /// # Errors
         ///
@@ -98,7 +96,15 @@ pub mod components {
         pub name: Option<String>,
     }
     /// The type of the tool. Currently, only `function` is supported.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionMessageToolCallChunkType {
         #[serde(rename = "function")]
         Function,
@@ -132,7 +138,15 @@ pub mod components {
         pub function: Option<ChatCompletionMessageToolCallChunkFunction>,
     }
     /// The role of the author of this message.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionStreamResponseDeltaRole {
         #[serde(rename = "developer")]
         Developer,
@@ -187,8 +201,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionStreamResponseDeltaRefusal
-    {
+    for ChatCompletionStreamResponseDeltaRefusal {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionStreamResponseDeltaRefusal::ChatCompletionStreamResponseDeltaRefusalVariant1(
                 value,
@@ -196,8 +209,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionStreamResponseDeltaRefusal>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionStreamResponseDeltaRefusal;
         /// # Errors
         ///
@@ -239,7 +251,9 @@ pub mod components {
     }
     impl ::std::convert::From<Vec<i64>> for ChatCompletionTokenLogprobBytes {
         fn from(value: Vec<i64>) -> Self {
-            ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant0(value)
+            ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionTokenLogprobBytes> for Vec<i64> {
@@ -252,19 +266,23 @@ pub mod components {
             value: ChatCompletionTokenLogprobBytes,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant0(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant0(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ChatCompletionTokenLogprobBytes {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ChatCompletionTokenLogprobBytes {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant1(value)
+            ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionTokenLogprobBytes> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ChatCompletionTokenLogprobBytes>
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionTokenLogprobBytes;
         /// # Errors
         ///
@@ -274,9 +292,9 @@ pub mod components {
             value: ChatCompletionTokenLogprobBytes,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant1(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionTokenLogprobBytes::ChatCompletionTokenLogprobBytesVariant1(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -294,7 +312,8 @@ pub mod components {
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionTokenLogprobTopLogprobsBytes> for Vec<i64> {
+    impl ::std::convert::TryFrom<ChatCompletionTokenLogprobTopLogprobsBytes>
+    for Vec<i64> {
         type Error = ChatCompletionTokenLogprobTopLogprobsBytes;
         /// # Errors
         ///
@@ -312,8 +331,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionTokenLogprobTopLogprobsBytes
-    {
+    for ChatCompletionTokenLogprobTopLogprobsBytes {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionTokenLogprobTopLogprobsBytes::ChatCompletionTokenLogprobTopLogprobsBytesVariant1(
                 value,
@@ -321,8 +339,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionTokenLogprobTopLogprobsBytes>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionTokenLogprobTopLogprobsBytes;
         /// # Errors
         ///
@@ -369,7 +386,15 @@ pub mod components {
     /// `length` if the maximum number of tokens specified in the request was reached,
     /// `content_filter` if content was omitted due to a flag from our content filters,
     /// `tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionStreamResponseChoicesFinishReason {
         #[serde(rename = "stop")]
         Stop,
@@ -415,7 +440,15 @@ pub mod components {
     ///   - When not set, the default behavior is 'auto'.
     ///
     ///   When the `service_tier` parameter is set, the response body will include the `service_tier` value based on the processing mode actually used to serve the request. This response value may be different from the value set in the parameter.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ServiceTierVariant0 {
         #[serde(rename = "auto")]
         Auto,
@@ -452,7 +485,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ServiceTier) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ServiceTier::ServiceTierVariant0(inner) => ::std::result::Result::Ok(inner),
+                ServiceTier::ServiceTierVariant0(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -470,7 +505,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ServiceTier) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ServiceTier::ServiceTierVariant1(inner) => ::std::result::Result::Ok(inner),
+                ServiceTier::ServiceTierVariant1(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -482,7 +519,15 @@ pub mod components {
         ServiceTierVariant1(Option<::serde_json::Value>),
     }
     /// The object type, which is always `chat.completion.chunk`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionStreamResponseObject {
         #[serde(rename = "chat.completion.chunk")]
         ChatCompletionChunk,
@@ -590,12 +635,14 @@ pub mod components {
         /// your application and the OpenAI API.
         pub include_obfuscation: Option<bool>,
     }
-    impl ::std::convert::From<ChatCompletionStreamOptionsVariant0> for ChatCompletionStreamOptions {
+    impl ::std::convert::From<ChatCompletionStreamOptionsVariant0>
+    for ChatCompletionStreamOptions {
         fn from(value: ChatCompletionStreamOptionsVariant0) -> Self {
             ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant0(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionStreamOptions> for ChatCompletionStreamOptionsVariant0 {
+    impl ::std::convert::TryFrom<ChatCompletionStreamOptions>
+    for ChatCompletionStreamOptionsVariant0 {
         type Error = ChatCompletionStreamOptions;
         /// # Errors
         ///
@@ -605,19 +652,21 @@ pub mod components {
             value: ChatCompletionStreamOptions,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant0(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant0(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ChatCompletionStreamOptions {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ChatCompletionStreamOptions {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant1(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionStreamOptions> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ChatCompletionStreamOptions>
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionStreamOptions;
         /// # Errors
         ///
@@ -627,9 +676,9 @@ pub mod components {
             value: ChatCompletionStreamOptions,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant1(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionStreamOptions::ChatCompletionStreamOptionsVariant1(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -641,7 +690,15 @@ pub mod components {
         ChatCompletionStreamOptionsVariant1(Option<::serde_json::Value>),
     }
     /// The type of the tool. Currently, only `function` is supported.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionToolType {
         #[serde(rename = "function")]
         Function,
@@ -656,7 +713,10 @@ pub mod components {
     /// The parameters the functions accepts, described as a JSON Schema object. See the [guide](/docs/guides/function-calling) for examples, and the [JSON Schema reference](https://json-schema.org/understanding-json-schema/) for documentation about the format.
     ///
     /// Omitting `parameters` defines a function with an empty parameter list.
-    pub type FunctionParameters = ::std::collections::HashMap<String, ::serde_json::Value>;
+    pub type FunctionParameters = ::std::collections::HashMap<
+        String,
+        ::serde_json::Value,
+    >;
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
     pub enum FunctionObjectStrict {
@@ -674,7 +734,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: FunctionObjectStrict) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: FunctionObjectStrict,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 FunctionObjectStrict::FunctionObjectStrictVariant0(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -694,7 +756,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: FunctionObjectStrict) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: FunctionObjectStrict,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 FunctionObjectStrict::FunctionObjectStrictVariant1(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -725,7 +789,15 @@ pub mod components {
     }
     /// # Tool choice mode
     /// `none` means the model will not call any tool and instead generates a message. `auto` means the model can pick between generating a message or calling one or more tools. `required` means the model must call one or more tools.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionToolChoiceOptionVariant0 {
         #[serde(rename = "none")]
         None,
@@ -744,7 +816,15 @@ pub mod components {
         }
     }
     /// Allowed tool configuration type. Always `allowed_tools`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionAllowedToolsChoiceType {
         #[serde(rename = "allowed_tools")]
         AllowedTools,
@@ -762,7 +842,15 @@ pub mod components {
     /// message.
     ///
     /// `required` requires the model to call one or more of the allowed tools.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionAllowedToolsMode {
         #[serde(rename = "auto")]
         Auto,
@@ -808,7 +896,15 @@ pub mod components {
         pub allowed_tools: ChatCompletionAllowedTools,
     }
     /// For function calling, the type is always `function`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionNamedToolChoiceType {
         #[serde(rename = "function")]
         Function,
@@ -834,7 +930,15 @@ pub mod components {
         pub function: ChatCompletionNamedToolChoiceFunction,
     }
     /// For custom tool calling, the type is always `custom`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionNamedToolChoiceCustomType {
         #[serde(rename = "custom")]
         Custom,
@@ -860,15 +964,13 @@ pub mod components {
         pub custom: ChatCompletionNamedToolChoiceCustomCustom,
     }
     impl ::std::convert::From<ChatCompletionToolChoiceOptionVariant0>
-        for ChatCompletionToolChoiceOption
-    {
+    for ChatCompletionToolChoiceOption {
         fn from(value: ChatCompletionToolChoiceOptionVariant0) -> Self {
             ChatCompletionToolChoiceOption::ChatCompletionToolChoiceOptionVariant0(value)
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption>
-        for ChatCompletionToolChoiceOptionVariant0
-    {
+    for ChatCompletionToolChoiceOptionVariant0 {
         type Error = ChatCompletionToolChoiceOption;
         /// # Errors
         ///
@@ -878,19 +980,21 @@ pub mod components {
             value: ChatCompletionToolChoiceOption,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionToolChoiceOption::ChatCompletionToolChoiceOptionVariant0(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionToolChoiceOption::ChatCompletionToolChoiceOptionVariant0(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionAllowedToolsChoice> for ChatCompletionToolChoiceOption {
+    impl ::std::convert::From<ChatCompletionAllowedToolsChoice>
+    for ChatCompletionToolChoiceOption {
         fn from(value: ChatCompletionAllowedToolsChoice) -> Self {
             ChatCompletionToolChoiceOption::ChatCompletionAllowedToolsChoice(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption> for ChatCompletionAllowedToolsChoice {
+    impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption>
+    for ChatCompletionAllowedToolsChoice {
         type Error = ChatCompletionToolChoiceOption;
         /// # Errors
         ///
@@ -900,19 +1004,21 @@ pub mod components {
             value: ChatCompletionToolChoiceOption,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionToolChoiceOption::ChatCompletionAllowedToolsChoice(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionToolChoiceOption::ChatCompletionAllowedToolsChoice(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionNamedToolChoice> for ChatCompletionToolChoiceOption {
+    impl ::std::convert::From<ChatCompletionNamedToolChoice>
+    for ChatCompletionToolChoiceOption {
         fn from(value: ChatCompletionNamedToolChoice) -> Self {
             ChatCompletionToolChoiceOption::ChatCompletionNamedToolChoice(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption> for ChatCompletionNamedToolChoice {
+    impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption>
+    for ChatCompletionNamedToolChoice {
         type Error = ChatCompletionToolChoiceOption;
         /// # Errors
         ///
@@ -929,14 +1035,14 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionNamedToolChoiceCustom> for ChatCompletionToolChoiceOption {
+    impl ::std::convert::From<ChatCompletionNamedToolChoiceCustom>
+    for ChatCompletionToolChoiceOption {
         fn from(value: ChatCompletionNamedToolChoiceCustom) -> Self {
             ChatCompletionToolChoiceOption::ChatCompletionNamedToolChoiceCustom(value)
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionToolChoiceOption>
-        for ChatCompletionNamedToolChoiceCustom
-    {
+    for ChatCompletionNamedToolChoiceCustom {
         type Error = ChatCompletionToolChoiceOption;
         /// # Errors
         ///
@@ -946,9 +1052,9 @@ pub mod components {
             value: ChatCompletionToolChoiceOption,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionToolChoiceOption::ChatCompletionNamedToolChoiceCustom(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionToolChoiceOption::ChatCompletionNamedToolChoiceCustom(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -968,7 +1074,15 @@ pub mod components {
         ChatCompletionNamedToolChoice(ChatCompletionNamedToolChoice),
         ChatCompletionNamedToolChoiceCustom(ChatCompletionNamedToolChoiceCustom),
     }
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum VoiceIdsSharedVariant1 {
         #[serde(rename = "alloy")]
         Alloy,
@@ -1020,7 +1134,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: VoiceIdsShared) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                VoiceIdsShared::VoiceIdsSharedVariant0(inner) => ::std::result::Result::Ok(inner),
+                VoiceIdsShared::VoiceIdsSharedVariant0(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -1038,7 +1154,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: VoiceIdsShared) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                VoiceIdsShared::VoiceIdsSharedVariant1(inner) => ::std::result::Result::Ok(inner),
+                VoiceIdsShared::VoiceIdsSharedVariant1(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -1054,7 +1172,8 @@ pub mod components {
             Metadata::MetadataVariant0(value)
         }
     }
-    impl ::std::convert::TryFrom<Metadata> for ::std::collections::HashMap<String, String> {
+    impl ::std::convert::TryFrom<Metadata>
+    for ::std::collections::HashMap<String, String> {
         type Error = Metadata;
         /// # Errors
         ///
@@ -1122,8 +1241,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateModelResponsePropertiesTopLogprobs
-    {
+    for CreateModelResponsePropertiesTopLogprobs {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateModelResponsePropertiesTopLogprobs::CreateModelResponsePropertiesTopLogprobsVariant1(
                 value,
@@ -1131,8 +1249,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateModelResponsePropertiesTopLogprobs>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateModelResponsePropertiesTopLogprobs;
         /// # Errors
         ///
@@ -1180,8 +1297,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateModelResponsePropertiesTemperature
-    {
+    for CreateModelResponsePropertiesTemperature {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateModelResponsePropertiesTemperature::CreateModelResponsePropertiesTemperatureVariant1(
                 value,
@@ -1189,8 +1305,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateModelResponsePropertiesTemperature>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateModelResponsePropertiesTemperature;
         /// # Errors
         ///
@@ -1215,7 +1330,9 @@ pub mod components {
     }
     impl ::std::convert::From<f64> for CreateModelResponsePropertiesTopP {
         fn from(value: f64) -> Self {
-            CreateModelResponsePropertiesTopP::CreateModelResponsePropertiesTopPVariant0(value)
+            CreateModelResponsePropertiesTopP::CreateModelResponsePropertiesTopPVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<CreateModelResponsePropertiesTopP> for f64 {
@@ -1235,12 +1352,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for CreateModelResponsePropertiesTopP {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for CreateModelResponsePropertiesTopP {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            CreateModelResponsePropertiesTopP::CreateModelResponsePropertiesTopPVariant1(value)
+            CreateModelResponsePropertiesTopP::CreateModelResponsePropertiesTopPVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<CreateModelResponsePropertiesTopP> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<CreateModelResponsePropertiesTopP>
+    for Option<::serde_json::Value> {
         type Error = CreateModelResponsePropertiesTopP;
         /// # Errors
         ///
@@ -1258,14 +1379,23 @@ pub mod components {
         }
     }
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateModelResponsePropertiesPromptCacheRetentionVariant0 {
         #[serde(rename = "in_memory")]
         InMemory,
         #[serde(rename = "24h")]
         _24h,
     }
-    impl ::std::fmt::Display for CreateModelResponsePropertiesPromptCacheRetentionVariant0 {
+    impl ::std::fmt::Display
+    for CreateModelResponsePropertiesPromptCacheRetentionVariant0 {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::InMemory => ::std::write!(__f, "in_memory"),
@@ -1279,20 +1409,22 @@ pub mod components {
         CreateModelResponsePropertiesPromptCacheRetentionVariant0(
             CreateModelResponsePropertiesPromptCacheRetentionVariant0,
         ),
-        CreateModelResponsePropertiesPromptCacheRetentionVariant1(Option<::serde_json::Value>),
+        CreateModelResponsePropertiesPromptCacheRetentionVariant1(
+            Option<::serde_json::Value>,
+        ),
     }
     impl ::std::convert::From<CreateModelResponsePropertiesPromptCacheRetentionVariant0>
-        for CreateModelResponsePropertiesPromptCacheRetention
-    {
-        fn from(value: CreateModelResponsePropertiesPromptCacheRetentionVariant0) -> Self {
+    for CreateModelResponsePropertiesPromptCacheRetention {
+        fn from(
+            value: CreateModelResponsePropertiesPromptCacheRetentionVariant0,
+        ) -> Self {
             CreateModelResponsePropertiesPromptCacheRetention::CreateModelResponsePropertiesPromptCacheRetentionVariant0(
                 value,
             )
         }
     }
     impl ::std::convert::TryFrom<CreateModelResponsePropertiesPromptCacheRetention>
-        for CreateModelResponsePropertiesPromptCacheRetentionVariant0
-    {
+    for CreateModelResponsePropertiesPromptCacheRetentionVariant0 {
         type Error = CreateModelResponsePropertiesPromptCacheRetention;
         /// # Errors
         ///
@@ -1310,8 +1442,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateModelResponsePropertiesPromptCacheRetention
-    {
+    for CreateModelResponsePropertiesPromptCacheRetention {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateModelResponsePropertiesPromptCacheRetention::CreateModelResponsePropertiesPromptCacheRetentionVariant1(
                 value,
@@ -1319,8 +1450,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateModelResponsePropertiesPromptCacheRetention>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateModelResponsePropertiesPromptCacheRetention;
         /// # Errors
         ///
@@ -1363,7 +1493,9 @@ pub mod components {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub service_tier: Option<ServiceTier>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub prompt_cache_retention: Option<CreateModelResponsePropertiesPromptCacheRetention>,
+        pub prompt_cache_retention: Option<
+            CreateModelResponsePropertiesPromptCacheRetention,
+        >,
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     /// Custom voice reference.
@@ -1382,9 +1514,13 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: VoiceIdsOrCustomVoice) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: VoiceIdsOrCustomVoice,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                VoiceIdsOrCustomVoice::VoiceIdsShared(inner) => ::std::result::Result::Ok(inner),
+                VoiceIdsOrCustomVoice::VoiceIdsShared(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -1394,13 +1530,16 @@ pub mod components {
             VoiceIdsOrCustomVoice::VoiceIdsOrCustomVoiceVariant1(value)
         }
     }
-    impl ::std::convert::TryFrom<VoiceIdsOrCustomVoice> for VoiceIdsOrCustomVoiceVariant1 {
+    impl ::std::convert::TryFrom<VoiceIdsOrCustomVoice>
+    for VoiceIdsOrCustomVoiceVariant1 {
         type Error = VoiceIdsOrCustomVoice;
         /// # Errors
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: VoiceIdsOrCustomVoice) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: VoiceIdsOrCustomVoice,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 VoiceIdsOrCustomVoice::VoiceIdsOrCustomVoiceVariant1(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -1418,7 +1557,15 @@ pub mod components {
         VoiceIdsOrCustomVoiceVariant1(VoiceIdsOrCustomVoiceVariant1),
     }
     /// The type of the custom tool. Always `custom`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CustomToolChatCompletionsType {
         #[serde(rename = "custom")]
         Custom,
@@ -1431,7 +1578,15 @@ pub mod components {
         }
     }
     /// Unconstrained text format. Always `text`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CustomToolChatCompletionsCustomFormatVariant0Type {
         #[serde(rename = "text")]
         Text,
@@ -1451,7 +1606,15 @@ pub mod components {
         pub r#type: CustomToolChatCompletionsCustomFormatVariant0Type,
     }
     /// Grammar format. Always `grammar`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CustomToolChatCompletionsCustomFormatVariant1Type {
         #[serde(rename = "grammar")]
         Grammar,
@@ -1464,14 +1627,23 @@ pub mod components {
         }
     }
     /// The syntax of the grammar definition. One of `lark` or `regex`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CustomToolChatCompletionsCustomFormatVariant1GrammarSyntax {
         #[serde(rename = "lark")]
         Lark,
         #[serde(rename = "regex")]
         Regex,
     }
-    impl ::std::fmt::Display for CustomToolChatCompletionsCustomFormatVariant1GrammarSyntax {
+    impl ::std::fmt::Display
+    for CustomToolChatCompletionsCustomFormatVariant1GrammarSyntax {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::Lark => ::std::write!(__f, "lark"),
@@ -1509,8 +1681,7 @@ pub mod components {
         ),
     }
     impl ::std::convert::From<CustomToolChatCompletionsCustomFormatVariant0>
-        for CustomToolChatCompletionsCustomFormat
-    {
+    for CustomToolChatCompletionsCustomFormat {
         fn from(value: CustomToolChatCompletionsCustomFormatVariant0) -> Self {
             CustomToolChatCompletionsCustomFormat::CustomToolChatCompletionsCustomFormatVariant0(
                 value,
@@ -1518,8 +1689,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CustomToolChatCompletionsCustomFormat>
-        for CustomToolChatCompletionsCustomFormatVariant0
-    {
+    for CustomToolChatCompletionsCustomFormatVariant0 {
         type Error = CustomToolChatCompletionsCustomFormat;
         /// # Errors
         ///
@@ -1537,8 +1707,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<CustomToolChatCompletionsCustomFormatVariant1>
-        for CustomToolChatCompletionsCustomFormat
-    {
+    for CustomToolChatCompletionsCustomFormat {
         fn from(value: CustomToolChatCompletionsCustomFormatVariant1) -> Self {
             CustomToolChatCompletionsCustomFormat::CustomToolChatCompletionsCustomFormatVariant1(
                 value,
@@ -1546,8 +1715,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CustomToolChatCompletionsCustomFormat>
-        for CustomToolChatCompletionsCustomFormatVariant1
-    {
+    for CustomToolChatCompletionsCustomFormatVariant1 {
         type Error = CustomToolChatCompletionsCustomFormat;
         /// # Errors
         ///
@@ -1586,7 +1754,15 @@ pub mod components {
         /// Properties of the custom tool.
         pub custom: CustomToolChatCompletionsCustom,
     }
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ModelIdsSharedVariant1 {
         #[serde(rename = "gpt-5.4")]
         Gpt54,
@@ -1892,7 +2068,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ModelIdsShared) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ModelIdsShared::ModelIdsSharedVariant0(inner) => ::std::result::Result::Ok(inner),
+                ModelIdsShared::ModelIdsSharedVariant0(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -1910,7 +2088,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ModelIdsShared) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ModelIdsShared::ModelIdsSharedVariant1(inner) => ::std::result::Result::Ok(inner),
+                ModelIdsShared::ModelIdsSharedVariant1(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -1929,7 +2109,9 @@ pub mod components {
     }
     impl ::std::convert::From<i64> for ModelResponsePropertiesTopLogprobs {
         fn from(value: i64) -> Self {
-            ModelResponsePropertiesTopLogprobs::ModelResponsePropertiesTopLogprobsVariant0(value)
+            ModelResponsePropertiesTopLogprobs::ModelResponsePropertiesTopLogprobsVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<ModelResponsePropertiesTopLogprobs> for i64 {
@@ -1949,12 +2131,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ModelResponsePropertiesTopLogprobs {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ModelResponsePropertiesTopLogprobs {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            ModelResponsePropertiesTopLogprobs::ModelResponsePropertiesTopLogprobsVariant1(value)
+            ModelResponsePropertiesTopLogprobs::ModelResponsePropertiesTopLogprobsVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<ModelResponsePropertiesTopLogprobs> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ModelResponsePropertiesTopLogprobs>
+    for Option<::serde_json::Value> {
         type Error = ModelResponsePropertiesTopLogprobs;
         /// # Errors
         ///
@@ -1979,7 +2165,9 @@ pub mod components {
     }
     impl ::std::convert::From<f64> for ModelResponsePropertiesTemperature {
         fn from(value: f64) -> Self {
-            ModelResponsePropertiesTemperature::ModelResponsePropertiesTemperatureVariant0(value)
+            ModelResponsePropertiesTemperature::ModelResponsePropertiesTemperatureVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<ModelResponsePropertiesTemperature> for f64 {
@@ -1999,12 +2187,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ModelResponsePropertiesTemperature {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ModelResponsePropertiesTemperature {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            ModelResponsePropertiesTemperature::ModelResponsePropertiesTemperatureVariant1(value)
+            ModelResponsePropertiesTemperature::ModelResponsePropertiesTemperatureVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<ModelResponsePropertiesTemperature> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ModelResponsePropertiesTemperature>
+    for Option<::serde_json::Value> {
         type Error = ModelResponsePropertiesTemperature;
         /// # Errors
         ///
@@ -2042,19 +2234,21 @@ pub mod components {
             value: ModelResponsePropertiesTopP,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ModelResponsePropertiesTopP::ModelResponsePropertiesTopPVariant0(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ModelResponsePropertiesTopP::ModelResponsePropertiesTopPVariant0(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ModelResponsePropertiesTopP {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ModelResponsePropertiesTopP {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ModelResponsePropertiesTopP::ModelResponsePropertiesTopPVariant1(value)
         }
     }
-    impl ::std::convert::TryFrom<ModelResponsePropertiesTopP> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ModelResponsePropertiesTopP>
+    for Option<::serde_json::Value> {
         type Error = ModelResponsePropertiesTopP;
         /// # Errors
         ///
@@ -2064,15 +2258,23 @@ pub mod components {
             value: ModelResponsePropertiesTopP,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ModelResponsePropertiesTopP::ModelResponsePropertiesTopPVariant1(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ModelResponsePropertiesTopP::ModelResponsePropertiesTopPVariant1(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ModelResponsePropertiesPromptCacheRetentionVariant0 {
         #[serde(rename = "in_memory")]
         InMemory,
@@ -2096,8 +2298,7 @@ pub mod components {
         ModelResponsePropertiesPromptCacheRetentionVariant1(Option<::serde_json::Value>),
     }
     impl ::std::convert::From<ModelResponsePropertiesPromptCacheRetentionVariant0>
-        for ModelResponsePropertiesPromptCacheRetention
-    {
+    for ModelResponsePropertiesPromptCacheRetention {
         fn from(value: ModelResponsePropertiesPromptCacheRetentionVariant0) -> Self {
             ModelResponsePropertiesPromptCacheRetention::ModelResponsePropertiesPromptCacheRetentionVariant0(
                 value,
@@ -2105,8 +2306,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ModelResponsePropertiesPromptCacheRetention>
-        for ModelResponsePropertiesPromptCacheRetentionVariant0
-    {
+    for ModelResponsePropertiesPromptCacheRetentionVariant0 {
         type Error = ModelResponsePropertiesPromptCacheRetention;
         /// # Errors
         ///
@@ -2124,8 +2324,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ModelResponsePropertiesPromptCacheRetention
-    {
+    for ModelResponsePropertiesPromptCacheRetention {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ModelResponsePropertiesPromptCacheRetention::ModelResponsePropertiesPromptCacheRetentionVariant1(
                 value,
@@ -2133,8 +2332,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ModelResponsePropertiesPromptCacheRetention>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ModelResponsePropertiesPromptCacheRetention;
         /// # Errors
         ///
@@ -2182,7 +2380,15 @@ pub mod components {
     /// Constrains the verbosity of the model's response. Lower values will result in
     /// more concise responses, while higher values will result in more verbose responses.
     /// Currently supported values are `low`, `medium`, and `high`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum VerbosityVariant0 {
         #[serde(rename = "low")]
         Low,
@@ -2244,7 +2450,15 @@ pub mod components {
     }
     /// The type of the predicted content you want to provide. This type is
     /// currently always `content`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum PredictionContentType {
         #[serde(rename = "content")]
         Content,
@@ -2257,7 +2471,15 @@ pub mod components {
         }
     }
     /// The type of the content part.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartTextType {
         #[serde(rename = "text")]
         Text,
@@ -2285,7 +2507,9 @@ pub mod components {
     /// can be returned much more quickly.
     pub enum PredictionContentContent {
         PredictionContentContentVariant0(String),
-        PredictionContentContentVariant1(Vec<ChatCompletionRequestMessageContentPartText>),
+        PredictionContentContentVariant1(
+            Vec<ChatCompletionRequestMessageContentPartText>,
+        ),
     }
     impl ::std::convert::From<String> for PredictionContentContent {
         fn from(value: String) -> Self {
@@ -2298,7 +2522,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: PredictionContentContent) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: PredictionContentContent,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 PredictionContentContent::PredictionContentContentVariant0(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2308,21 +2534,21 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestMessageContentPartText>>
-        for PredictionContentContent
-    {
+    for PredictionContentContent {
         fn from(value: Vec<ChatCompletionRequestMessageContentPartText>) -> Self {
             PredictionContentContent::PredictionContentContentVariant1(value)
         }
     }
     impl ::std::convert::TryFrom<PredictionContentContent>
-        for Vec<ChatCompletionRequestMessageContentPartText>
-    {
+    for Vec<ChatCompletionRequestMessageContentPartText> {
         type Error = PredictionContentContent;
         /// # Errors
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: PredictionContentContent) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: PredictionContentContent,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 PredictionContentContent::PredictionContentContentVariant1(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2354,7 +2580,15 @@ pub mod components {
     /// - All models before `gpt-5.1` default to `medium` reasoning effort, and do not support `none`.
     /// - The `gpt-5-pro` model defaults to (and only supports) `high` reasoning effort.
     /// - `xhigh` is supported for all models after `gpt-5.1-codex-max`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ReasoningEffortVariant0 {
         #[serde(rename = "none")]
         None,
@@ -2394,7 +2628,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ReasoningEffort) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ReasoningEffort::ReasoningEffortVariant0(inner) => ::std::result::Result::Ok(inner),
+                ReasoningEffort::ReasoningEffortVariant0(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -2412,7 +2648,9 @@ pub mod components {
         /// `#variant_ident` variant.
         fn try_from(value: ReasoningEffort) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ReasoningEffort::ReasoningEffortVariant1(inner) => ::std::result::Result::Ok(inner),
+                ReasoningEffort::ReasoningEffortVariant1(inner) => {
+                    ::std::result::Result::Ok(inner)
+                }
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -2434,7 +2672,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: StopConfiguration) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: StopConfiguration,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 StopConfiguration::StopConfigurationVariant0(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2454,7 +2694,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: StopConfiguration) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: StopConfiguration,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 StopConfiguration::StopConfigurationVariant1(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2473,7 +2715,15 @@ pub mod components {
         StopConfigurationVariant0(String),
         StopConfigurationVariant1(Vec<String>),
     }
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ResponseModalitiesVariant0 {
         #[serde(rename = "text")]
         Text,
@@ -2493,13 +2743,16 @@ pub mod components {
             ResponseModalities::ResponseModalitiesVariant0(value)
         }
     }
-    impl ::std::convert::TryFrom<ResponseModalities> for Vec<ResponseModalitiesVariant0> {
+    impl ::std::convert::TryFrom<ResponseModalities>
+    for Vec<ResponseModalitiesVariant0> {
         type Error = ResponseModalities;
         /// # Errors
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: ResponseModalities) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: ResponseModalities,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 ResponseModalities::ResponseModalitiesVariant0(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2519,7 +2772,9 @@ pub mod components {
         ///
         /// Returns the original enum value if it does not match the
         /// `#variant_ident` variant.
-        fn try_from(value: ResponseModalities) -> ::std::result::Result<Self, Self::Error> {
+        fn try_from(
+            value: ResponseModalities,
+        ) -> ::std::result::Result<Self, Self::Error> {
             match value {
                 ResponseModalities::ResponseModalitiesVariant1(inner) => {
                     ::std::result::Result::Ok(inner)
@@ -2535,7 +2790,15 @@ pub mod components {
         ResponseModalitiesVariant1(Option<::serde_json::Value>),
     }
     /// The type of response format being defined. Always `text`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ResponseFormatTextType {
         #[serde(rename = "text")]
         Text,
@@ -2557,8 +2820,10 @@ pub mod components {
     /// # JSON schema
     /// The schema for the response format, described as a JSON Schema object.
     /// Learn how to build JSON schemas [here](https://json-schema.org/).
-    pub type ResponseFormatJsonSchemaSchema =
-        ::std::collections::HashMap<String, ::serde_json::Value>;
+    pub type ResponseFormatJsonSchemaSchema = ::std::collections::HashMap<
+        String,
+        ::serde_json::Value,
+    >;
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     /// # Web search location
     /// Approximate location parameters for the search.
@@ -2590,7 +2855,15 @@ pub mod components {
     }
     /// High level guidance for the amount of context window space to use for the
     /// search. One of `low`, `medium`, or `high`. `medium` is the default.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum WebSearchContextSize {
         #[serde(rename = "low")]
         Low,
@@ -2600,7 +2873,15 @@ pub mod components {
         High,
     }
     /// The object type, which is always "model".
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ModelObject {
         #[serde(rename = "model")]
         Model,
@@ -2625,7 +2906,15 @@ pub mod components {
         /// The organization that owns the model.
         pub owned_by: String,
     }
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ListModelsResponseObject {
         #[serde(rename = "list")]
         List,
@@ -2643,7 +2932,15 @@ pub mod components {
         pub data: Vec<Model>,
     }
     /// The type of response format being defined. Always `json_schema`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ResponseFormatJsonSchemaType {
         #[serde(rename = "json_schema")]
         JsonSchema,
@@ -2686,8 +2983,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ResponseFormatJsonSchemaJsonSchemaStrict
-    {
+    for ResponseFormatJsonSchemaJsonSchemaStrict {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ResponseFormatJsonSchemaJsonSchemaStrict::ResponseFormatJsonSchemaJsonSchemaStrictVariant1(
                 value,
@@ -2695,8 +2991,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ResponseFormatJsonSchemaJsonSchemaStrict>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ResponseFormatJsonSchemaJsonSchemaStrict;
         /// # Errors
         ///
@@ -2740,7 +3035,15 @@ pub mod components {
         pub json_schema: ResponseFormatJsonSchemaJsonSchema,
     }
     /// The type of response format being defined. Always `json_object`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ResponseFormatJsonObjectType {
         #[serde(rename = "json_object")]
         JsonObject,
@@ -2782,7 +3085,15 @@ pub mod components {
     /// Whether to enable [parallel function calling](/docs/guides/function-calling#configuring-parallel-function-calling) during tool use.
     pub type ParallelToolCalls = bool;
     /// The type of the tool. Always `custom`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionMessageCustomToolCallType {
         #[serde(rename = "custom")]
         Custom,
@@ -2843,7 +3154,8 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for CreateChatCompletionRequestTopLogprobs {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for CreateChatCompletionRequestTopLogprobs {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionRequestTopLogprobs::CreateChatCompletionRequestTopLogprobsVariant1(
                 value,
@@ -2851,8 +3163,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestTopLogprobs>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateChatCompletionRequestTopLogprobs;
         /// # Errors
         ///
@@ -2899,7 +3210,8 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for CreateChatCompletionRequestTemperature {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for CreateChatCompletionRequestTemperature {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionRequestTemperature::CreateChatCompletionRequestTemperatureVariant1(
                 value,
@@ -2907,8 +3219,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestTemperature>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateChatCompletionRequestTemperature;
         /// # Errors
         ///
@@ -2933,7 +3244,9 @@ pub mod components {
     }
     impl ::std::convert::From<f64> for CreateChatCompletionRequestTopP {
         fn from(value: f64) -> Self {
-            CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant0(value)
+            CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestTopP> for f64 {
@@ -2946,19 +3259,23 @@ pub mod components {
             value: CreateChatCompletionRequestTopP,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant0(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant0(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for CreateChatCompletionRequestTopP {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for CreateChatCompletionRequestTopP {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant1(value)
+            CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionRequestTopP> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<CreateChatCompletionRequestTopP>
+    for Option<::serde_json::Value> {
         type Error = CreateChatCompletionRequestTopP;
         /// # Errors
         ///
@@ -2968,22 +3285,31 @@ pub mod components {
             value: CreateChatCompletionRequestTopP,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant1(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                CreateChatCompletionRequestTopP::CreateChatCompletionRequestTopPVariant1(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
     /// The retention policy for the prompt cache. Set to `24h` to enable extended prompt caching, which keeps cached prefixes active for longer, up to a maximum of 24 hours. [Learn more](/docs/guides/prompt-caching#prompt-cache-retention).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionRequestPromptCacheRetentionVariant0 {
         #[serde(rename = "in_memory")]
         InMemory,
         #[serde(rename = "24h")]
         _24h,
     }
-    impl ::std::fmt::Display for CreateChatCompletionRequestPromptCacheRetentionVariant0 {
+    impl ::std::fmt::Display
+    for CreateChatCompletionRequestPromptCacheRetentionVariant0 {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::InMemory => ::std::write!(__f, "in_memory"),
@@ -2997,11 +3323,12 @@ pub mod components {
         CreateChatCompletionRequestPromptCacheRetentionVariant0(
             CreateChatCompletionRequestPromptCacheRetentionVariant0,
         ),
-        CreateChatCompletionRequestPromptCacheRetentionVariant1(Option<::serde_json::Value>),
+        CreateChatCompletionRequestPromptCacheRetentionVariant1(
+            Option<::serde_json::Value>,
+        ),
     }
     impl ::std::convert::From<CreateChatCompletionRequestPromptCacheRetentionVariant0>
-        for CreateChatCompletionRequestPromptCacheRetention
-    {
+    for CreateChatCompletionRequestPromptCacheRetention {
         fn from(value: CreateChatCompletionRequestPromptCacheRetentionVariant0) -> Self {
             CreateChatCompletionRequestPromptCacheRetention::CreateChatCompletionRequestPromptCacheRetentionVariant0(
                 value,
@@ -3009,8 +3336,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestPromptCacheRetention>
-        for CreateChatCompletionRequestPromptCacheRetentionVariant0
-    {
+    for CreateChatCompletionRequestPromptCacheRetentionVariant0 {
         type Error = CreateChatCompletionRequestPromptCacheRetention;
         /// # Errors
         ///
@@ -3028,8 +3354,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateChatCompletionRequestPromptCacheRetention
-    {
+    for CreateChatCompletionRequestPromptCacheRetention {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionRequestPromptCacheRetention::CreateChatCompletionRequestPromptCacheRetentionVariant1(
                 value,
@@ -3037,8 +3362,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestPromptCacheRetention>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateChatCompletionRequestPromptCacheRetention;
         /// # Errors
         ///
@@ -3071,7 +3395,8 @@ pub mod components {
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestDeveloperMessageContent> for String {
+    impl ::std::convert::TryFrom<ChatCompletionRequestDeveloperMessageContent>
+    for String {
         type Error = ChatCompletionRequestDeveloperMessageContent;
         /// # Errors
         ///
@@ -3089,8 +3414,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestMessageContentPartText>>
-        for ChatCompletionRequestDeveloperMessageContent
-    {
+    for ChatCompletionRequestDeveloperMessageContent {
         fn from(value: Vec<ChatCompletionRequestMessageContentPartText>) -> Self {
             ChatCompletionRequestDeveloperMessageContent::ChatCompletionRequestDeveloperMessageContentVariant1(
                 value,
@@ -3098,8 +3422,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestDeveloperMessageContent>
-        for Vec<ChatCompletionRequestMessageContentPartText>
-    {
+    for Vec<ChatCompletionRequestMessageContentPartText> {
         type Error = ChatCompletionRequestDeveloperMessageContent;
         /// # Errors
         ///
@@ -3117,7 +3440,15 @@ pub mod components {
         }
     }
     /// The role of the messages author, in this case `developer`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestDeveloperMessageRole {
         #[serde(rename = "developer")]
         Developer,
@@ -3144,8 +3475,7 @@ pub mod components {
         pub name: Option<String>,
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartText>
-        for ChatCompletionRequestSystemMessageContentPart
-    {
+    for ChatCompletionRequestSystemMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartText) -> Self {
             ChatCompletionRequestSystemMessageContentPart::ChatCompletionRequestMessageContentPartText(
                 value,
@@ -3153,8 +3483,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestSystemMessageContentPart>
-        for ChatCompletionRequestMessageContentPartText
-    {
+    for ChatCompletionRequestMessageContentPartText {
         type Error = ChatCompletionRequestSystemMessageContentPart;
         /// # Errors
         ///
@@ -3174,7 +3503,9 @@ pub mod components {
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
     pub enum ChatCompletionRequestSystemMessageContentPart {
-        ChatCompletionRequestMessageContentPartText(ChatCompletionRequestMessageContentPartText),
+        ChatCompletionRequestMessageContentPartText(
+            ChatCompletionRequestMessageContentPartText,
+        ),
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
@@ -3210,8 +3541,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestSystemMessageContentPart>>
-        for ChatCompletionRequestSystemMessageContent
-    {
+    for ChatCompletionRequestSystemMessageContent {
         fn from(value: Vec<ChatCompletionRequestSystemMessageContentPart>) -> Self {
             ChatCompletionRequestSystemMessageContent::ChatCompletionRequestSystemMessageContentVariant1(
                 value,
@@ -3219,8 +3549,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestSystemMessageContent>
-        for Vec<ChatCompletionRequestSystemMessageContentPart>
-    {
+    for Vec<ChatCompletionRequestSystemMessageContentPart> {
         type Error = ChatCompletionRequestSystemMessageContent;
         /// # Errors
         ///
@@ -3238,7 +3567,15 @@ pub mod components {
         }
     }
     /// The role of the messages author, in this case `system`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestSystemMessageRole {
         #[serde(rename = "system")]
         System,
@@ -3265,7 +3602,15 @@ pub mod components {
         pub name: Option<String>,
     }
     /// The type of the content part.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartImageType {
         #[serde(rename = "image_url")]
         ImageUrl,
@@ -3278,7 +3623,15 @@ pub mod components {
         }
     }
     /// Specifies the detail level of the image. Learn more in the [Vision guide](/docs/guides/vision#low-or-high-fidelity-image-understanding).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartImageImageUrlDetail {
         #[serde(rename = "auto")]
         Auto,
@@ -3287,7 +3640,8 @@ pub mod components {
         #[serde(rename = "high")]
         High,
     }
-    impl ::std::fmt::Display for ChatCompletionRequestMessageContentPartImageImageUrlDetail {
+    impl ::std::fmt::Display
+    for ChatCompletionRequestMessageContentPartImageImageUrlDetail {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::Auto => ::std::write!(__f, "auto"),
@@ -3313,7 +3667,15 @@ pub mod components {
         pub image_url: ChatCompletionRequestMessageContentPartImageImageUrl,
     }
     /// The type of the content part. Always `input_audio`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartAudioType {
         #[serde(rename = "input_audio")]
         InputAudio,
@@ -3326,14 +3688,23 @@ pub mod components {
         }
     }
     /// The format of the encoded audio data. Currently supports "wav" and "mp3".
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartAudioInputAudioFormat {
         #[serde(rename = "wav")]
         Wav,
         #[serde(rename = "mp3")]
         Mp3,
     }
-    impl ::std::fmt::Display for ChatCompletionRequestMessageContentPartAudioInputAudioFormat {
+    impl ::std::fmt::Display
+    for ChatCompletionRequestMessageContentPartAudioInputAudioFormat {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::Wav => ::std::write!(__f, "wav"),
@@ -3357,7 +3728,15 @@ pub mod components {
         pub input_audio: ChatCompletionRequestMessageContentPartAudioInputAudio,
     }
     /// The type of the content part. Always `file`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartFileType {
         #[serde(rename = "file")]
         File,
@@ -3392,8 +3771,7 @@ pub mod components {
         pub file: ChatCompletionRequestMessageContentPartFileFile,
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartText>
-        for ChatCompletionRequestUserMessageContentPart
-    {
+    for ChatCompletionRequestUserMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartText) -> Self {
             ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartText(
                 value,
@@ -3401,8 +3779,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestUserMessageContentPart>
-        for ChatCompletionRequestMessageContentPartText
-    {
+    for ChatCompletionRequestMessageContentPartText {
         type Error = ChatCompletionRequestUserMessageContentPart;
         /// # Errors
         ///
@@ -3420,8 +3797,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartImage>
-        for ChatCompletionRequestUserMessageContentPart
-    {
+    for ChatCompletionRequestUserMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartImage) -> Self {
             ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartImage(
                 value,
@@ -3429,8 +3805,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestUserMessageContentPart>
-        for ChatCompletionRequestMessageContentPartImage
-    {
+    for ChatCompletionRequestMessageContentPartImage {
         type Error = ChatCompletionRequestUserMessageContentPart;
         /// # Errors
         ///
@@ -3448,8 +3823,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartAudio>
-        for ChatCompletionRequestUserMessageContentPart
-    {
+    for ChatCompletionRequestUserMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartAudio) -> Self {
             ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartAudio(
                 value,
@@ -3457,8 +3831,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestUserMessageContentPart>
-        for ChatCompletionRequestMessageContentPartAudio
-    {
+    for ChatCompletionRequestMessageContentPartAudio {
         type Error = ChatCompletionRequestUserMessageContentPart;
         /// # Errors
         ///
@@ -3476,8 +3849,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartFile>
-        for ChatCompletionRequestUserMessageContentPart
-    {
+    for ChatCompletionRequestUserMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartFile) -> Self {
             ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartFile(
                 value,
@@ -3485,8 +3857,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestUserMessageContentPart>
-        for ChatCompletionRequestMessageContentPartFile
-    {
+    for ChatCompletionRequestMessageContentPartFile {
         type Error = ChatCompletionRequestUserMessageContentPart;
         /// # Errors
         ///
@@ -3506,10 +3877,18 @@ pub mod components {
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
     pub enum ChatCompletionRequestUserMessageContentPart {
-        ChatCompletionRequestMessageContentPartText(ChatCompletionRequestMessageContentPartText),
-        ChatCompletionRequestMessageContentPartImage(ChatCompletionRequestMessageContentPartImage),
-        ChatCompletionRequestMessageContentPartAudio(ChatCompletionRequestMessageContentPartAudio),
-        ChatCompletionRequestMessageContentPartFile(ChatCompletionRequestMessageContentPartFile),
+        ChatCompletionRequestMessageContentPartText(
+            ChatCompletionRequestMessageContentPartText,
+        ),
+        ChatCompletionRequestMessageContentPartImage(
+            ChatCompletionRequestMessageContentPartImage,
+        ),
+        ChatCompletionRequestMessageContentPartAudio(
+            ChatCompletionRequestMessageContentPartAudio,
+        ),
+        ChatCompletionRequestMessageContentPartFile(
+            ChatCompletionRequestMessageContentPartFile,
+        ),
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
@@ -3545,8 +3924,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestUserMessageContentPart>>
-        for ChatCompletionRequestUserMessageContent
-    {
+    for ChatCompletionRequestUserMessageContent {
         fn from(value: Vec<ChatCompletionRequestUserMessageContentPart>) -> Self {
             ChatCompletionRequestUserMessageContent::ChatCompletionRequestUserMessageContentVariant1(
                 value,
@@ -3554,8 +3932,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestUserMessageContent>
-        for Vec<ChatCompletionRequestUserMessageContentPart>
-    {
+    for Vec<ChatCompletionRequestUserMessageContentPart> {
         type Error = ChatCompletionRequestUserMessageContent;
         /// # Errors
         ///
@@ -3573,7 +3950,15 @@ pub mod components {
         }
     }
     /// The role of the messages author, in this case `user`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestUserMessageRole {
         #[serde(rename = "user")]
         User,
@@ -3599,7 +3984,15 @@ pub mod components {
         pub name: Option<String>,
     }
     /// The type of the content part.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestMessageContentPartRefusalType {
         #[serde(rename = "refusal")]
         Refusal,
@@ -3620,8 +4013,7 @@ pub mod components {
         pub refusal: String,
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartText>
-        for ChatCompletionRequestAssistantMessageContentPart
-    {
+    for ChatCompletionRequestAssistantMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartText) -> Self {
             ChatCompletionRequestAssistantMessageContentPart::ChatCompletionRequestMessageContentPartText(
                 value,
@@ -3629,8 +4021,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContentPart>
-        for ChatCompletionRequestMessageContentPartText
-    {
+    for ChatCompletionRequestMessageContentPartText {
         type Error = ChatCompletionRequestAssistantMessageContentPart;
         /// # Errors
         ///
@@ -3648,8 +4039,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartRefusal>
-        for ChatCompletionRequestAssistantMessageContentPart
-    {
+    for ChatCompletionRequestAssistantMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartRefusal) -> Self {
             ChatCompletionRequestAssistantMessageContentPart::ChatCompletionRequestMessageContentPartRefusal(
                 value,
@@ -3657,8 +4047,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContentPart>
-        for ChatCompletionRequestMessageContentPartRefusal
-    {
+    for ChatCompletionRequestMessageContentPartRefusal {
         type Error = ChatCompletionRequestAssistantMessageContentPart;
         /// # Errors
         ///
@@ -3678,7 +4067,9 @@ pub mod components {
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(tag = "type")]
     pub enum ChatCompletionRequestAssistantMessageContentPart {
-        ChatCompletionRequestMessageContentPartText(ChatCompletionRequestMessageContentPartText),
+        ChatCompletionRequestMessageContentPartText(
+            ChatCompletionRequestMessageContentPartText,
+        ),
         ChatCompletionRequestMessageContentPartRefusal(
             ChatCompletionRequestMessageContentPartRefusal,
         ),
@@ -3692,14 +4083,16 @@ pub mod components {
             Vec<ChatCompletionRequestAssistantMessageContentPart>,
         ),
     }
-    impl ::std::convert::From<String> for ChatCompletionRequestAssistantMessageContentVariant0 {
+    impl ::std::convert::From<String>
+    for ChatCompletionRequestAssistantMessageContentVariant0 {
         fn from(value: String) -> Self {
             ChatCompletionRequestAssistantMessageContentVariant0::ChatCompletionRequestAssistantMessageContentVariant0Variant0(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContentVariant0> for String {
+    impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContentVariant0>
+    for String {
         type Error = ChatCompletionRequestAssistantMessageContentVariant0;
         /// # Errors
         ///
@@ -3717,8 +4110,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestAssistantMessageContentPart>>
-        for ChatCompletionRequestAssistantMessageContentVariant0
-    {
+    for ChatCompletionRequestAssistantMessageContentVariant0 {
         fn from(value: Vec<ChatCompletionRequestAssistantMessageContentPart>) -> Self {
             ChatCompletionRequestAssistantMessageContentVariant0::ChatCompletionRequestAssistantMessageContentVariant0Variant1(
                 value,
@@ -3726,8 +4118,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContentVariant0>
-        for Vec<ChatCompletionRequestAssistantMessageContentPart>
-    {
+    for Vec<ChatCompletionRequestAssistantMessageContentPart> {
         type Error = ChatCompletionRequestAssistantMessageContentVariant0;
         /// # Errors
         ///
@@ -3750,11 +4141,12 @@ pub mod components {
         ChatCompletionRequestAssistantMessageContentVariant0(
             ChatCompletionRequestAssistantMessageContentVariant0,
         ),
-        ChatCompletionRequestAssistantMessageContentVariant1(Option<::serde_json::Value>),
+        ChatCompletionRequestAssistantMessageContentVariant1(
+            Option<::serde_json::Value>,
+        ),
     }
     impl ::std::convert::From<ChatCompletionRequestAssistantMessageContentVariant0>
-        for ChatCompletionRequestAssistantMessageContent
-    {
+    for ChatCompletionRequestAssistantMessageContent {
         fn from(value: ChatCompletionRequestAssistantMessageContentVariant0) -> Self {
             ChatCompletionRequestAssistantMessageContent::ChatCompletionRequestAssistantMessageContentVariant0(
                 value,
@@ -3762,8 +4154,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContent>
-        for ChatCompletionRequestAssistantMessageContentVariant0
-    {
+    for ChatCompletionRequestAssistantMessageContentVariant0 {
         type Error = ChatCompletionRequestAssistantMessageContent;
         /// # Errors
         ///
@@ -3781,8 +4172,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionRequestAssistantMessageContent
-    {
+    for ChatCompletionRequestAssistantMessageContent {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionRequestAssistantMessageContent::ChatCompletionRequestAssistantMessageContentVariant1(
                 value,
@@ -3790,8 +4180,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageContent>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionRequestAssistantMessageContent;
         /// # Errors
         ///
@@ -3812,7 +4201,9 @@ pub mod components {
     #[serde(untagged)]
     pub enum ChatCompletionRequestAssistantMessageRefusal {
         ChatCompletionRequestAssistantMessageRefusalVariant0(String),
-        ChatCompletionRequestAssistantMessageRefusalVariant1(Option<::serde_json::Value>),
+        ChatCompletionRequestAssistantMessageRefusalVariant1(
+            Option<::serde_json::Value>,
+        ),
     }
     impl ::std::convert::From<String> for ChatCompletionRequestAssistantMessageRefusal {
         fn from(value: String) -> Self {
@@ -3821,7 +4212,8 @@ pub mod components {
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageRefusal> for String {
+    impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageRefusal>
+    for String {
         type Error = ChatCompletionRequestAssistantMessageRefusal;
         /// # Errors
         ///
@@ -3839,8 +4231,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionRequestAssistantMessageRefusal
-    {
+    for ChatCompletionRequestAssistantMessageRefusal {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionRequestAssistantMessageRefusal::ChatCompletionRequestAssistantMessageRefusalVariant1(
                 value,
@@ -3848,8 +4239,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageRefusal>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionRequestAssistantMessageRefusal;
         /// # Errors
         ///
@@ -3867,7 +4257,15 @@ pub mod components {
         }
     }
     /// The role of the messages author, in this case `assistant`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestAssistantMessageRole {
         #[serde(rename = "assistant")]
         Assistant,
@@ -3895,8 +4293,7 @@ pub mod components {
         ChatCompletionRequestAssistantMessageAudioVariant1(Option<::serde_json::Value>),
     }
     impl ::std::convert::From<ChatCompletionRequestAssistantMessageAudioVariant0>
-        for ChatCompletionRequestAssistantMessageAudio
-    {
+    for ChatCompletionRequestAssistantMessageAudio {
         fn from(value: ChatCompletionRequestAssistantMessageAudioVariant0) -> Self {
             ChatCompletionRequestAssistantMessageAudio::ChatCompletionRequestAssistantMessageAudioVariant0(
                 value,
@@ -3904,8 +4301,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageAudio>
-        for ChatCompletionRequestAssistantMessageAudioVariant0
-    {
+    for ChatCompletionRequestAssistantMessageAudioVariant0 {
         type Error = ChatCompletionRequestAssistantMessageAudio;
         /// # Errors
         ///
@@ -3923,8 +4319,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionRequestAssistantMessageAudio
-    {
+    for ChatCompletionRequestAssistantMessageAudio {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionRequestAssistantMessageAudio::ChatCompletionRequestAssistantMessageAudioVariant1(
                 value,
@@ -3932,8 +4327,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageAudio>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionRequestAssistantMessageAudio;
         /// # Errors
         ///
@@ -3951,7 +4345,15 @@ pub mod components {
         }
     }
     /// The type of the tool. Currently, only `function` is supported.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionMessageToolCallType {
         #[serde(rename = "function")]
         Function,
@@ -3983,17 +4385,19 @@ pub mod components {
         pub function: ChatCompletionMessageToolCallFunction,
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
-    #[serde(tag = "type")]
+    #[serde(untagged)]
     pub enum ChatCompletionMessageToolCallsItem {
         ChatCompletionMessageToolCall(ChatCompletionMessageToolCall),
         ChatCompletionMessageCustomToolCall(ChatCompletionMessageCustomToolCall),
     }
-    impl ::std::convert::From<ChatCompletionMessageToolCall> for ChatCompletionMessageToolCallsItem {
+    impl ::std::convert::From<ChatCompletionMessageToolCall>
+    for ChatCompletionMessageToolCallsItem {
         fn from(value: ChatCompletionMessageToolCall) -> Self {
             ChatCompletionMessageToolCallsItem::ChatCompletionMessageToolCall(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionMessageToolCallsItem> for ChatCompletionMessageToolCall {
+    impl ::std::convert::TryFrom<ChatCompletionMessageToolCallsItem>
+    for ChatCompletionMessageToolCall {
         type Error = ChatCompletionMessageToolCallsItem;
         /// # Errors
         ///
@@ -4003,23 +4407,23 @@ pub mod components {
             value: ChatCompletionMessageToolCallsItem,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionMessageToolCallsItem::ChatCompletionMessageToolCall(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionMessageToolCallsItem::ChatCompletionMessageToolCall(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
     impl ::std::convert::From<ChatCompletionMessageCustomToolCall>
-        for ChatCompletionMessageToolCallsItem
-    {
+    for ChatCompletionMessageToolCallsItem {
         fn from(value: ChatCompletionMessageCustomToolCall) -> Self {
-            ChatCompletionMessageToolCallsItem::ChatCompletionMessageCustomToolCall(value)
+            ChatCompletionMessageToolCallsItem::ChatCompletionMessageCustomToolCall(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionMessageToolCallsItem>
-        for ChatCompletionMessageCustomToolCall
-    {
+    for ChatCompletionMessageCustomToolCall {
         type Error = ChatCompletionMessageToolCallsItem;
         /// # Errors
         ///
@@ -4029,9 +4433,9 @@ pub mod components {
             value: ChatCompletionMessageToolCallsItem,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionMessageToolCallsItem::ChatCompletionMessageCustomToolCall(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionMessageToolCallsItem::ChatCompletionMessageCustomToolCall(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
@@ -4053,20 +4457,22 @@ pub mod components {
         ChatCompletionRequestAssistantMessageFunctionCallVariant0(
             ChatCompletionRequestAssistantMessageFunctionCallVariant0,
         ),
-        ChatCompletionRequestAssistantMessageFunctionCallVariant1(Option<::serde_json::Value>),
+        ChatCompletionRequestAssistantMessageFunctionCallVariant1(
+            Option<::serde_json::Value>,
+        ),
     }
     impl ::std::convert::From<ChatCompletionRequestAssistantMessageFunctionCallVariant0>
-        for ChatCompletionRequestAssistantMessageFunctionCall
-    {
-        fn from(value: ChatCompletionRequestAssistantMessageFunctionCallVariant0) -> Self {
+    for ChatCompletionRequestAssistantMessageFunctionCall {
+        fn from(
+            value: ChatCompletionRequestAssistantMessageFunctionCallVariant0,
+        ) -> Self {
             ChatCompletionRequestAssistantMessageFunctionCall::ChatCompletionRequestAssistantMessageFunctionCallVariant0(
                 value,
             )
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageFunctionCall>
-        for ChatCompletionRequestAssistantMessageFunctionCallVariant0
-    {
+    for ChatCompletionRequestAssistantMessageFunctionCallVariant0 {
         type Error = ChatCompletionRequestAssistantMessageFunctionCall;
         /// # Errors
         ///
@@ -4084,8 +4490,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionRequestAssistantMessageFunctionCall
-    {
+    for ChatCompletionRequestAssistantMessageFunctionCall {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionRequestAssistantMessageFunctionCall::ChatCompletionRequestAssistantMessageFunctionCallVariant1(
                 value,
@@ -4093,8 +4498,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestAssistantMessageFunctionCall>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionRequestAssistantMessageFunctionCall;
         /// # Errors
         ///
@@ -4132,7 +4536,15 @@ pub mod components {
         pub function_call: Option<ChatCompletionRequestAssistantMessageFunctionCall>,
     }
     /// The role of the messages author, in this case `tool`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestToolMessageRole {
         #[serde(rename = "tool")]
         Tool,
@@ -4145,8 +4557,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionRequestMessageContentPartText>
-        for ChatCompletionRequestToolMessageContentPart
-    {
+    for ChatCompletionRequestToolMessageContentPart {
         fn from(value: ChatCompletionRequestMessageContentPartText) -> Self {
             ChatCompletionRequestToolMessageContentPart::ChatCompletionRequestMessageContentPartText(
                 value,
@@ -4154,8 +4565,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestToolMessageContentPart>
-        for ChatCompletionRequestMessageContentPartText
-    {
+    for ChatCompletionRequestMessageContentPartText {
         type Error = ChatCompletionRequestToolMessageContentPart;
         /// # Errors
         ///
@@ -4175,7 +4585,9 @@ pub mod components {
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
     pub enum ChatCompletionRequestToolMessageContentPart {
-        ChatCompletionRequestMessageContentPartText(ChatCompletionRequestMessageContentPartText),
+        ChatCompletionRequestMessageContentPartText(
+            ChatCompletionRequestMessageContentPartText,
+        ),
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
@@ -4211,8 +4623,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Vec<ChatCompletionRequestToolMessageContentPart>>
-        for ChatCompletionRequestToolMessageContent
-    {
+    for ChatCompletionRequestToolMessageContent {
         fn from(value: Vec<ChatCompletionRequestToolMessageContentPart>) -> Self {
             ChatCompletionRequestToolMessageContent::ChatCompletionRequestToolMessageContentVariant1(
                 value,
@@ -4220,8 +4631,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestToolMessageContent>
-        for Vec<ChatCompletionRequestToolMessageContentPart>
-    {
+    for Vec<ChatCompletionRequestToolMessageContentPart> {
         type Error = ChatCompletionRequestToolMessageContent;
         /// # Errors
         ///
@@ -4249,7 +4659,15 @@ pub mod components {
         pub tool_call_id: String,
     }
     /// The role of the messages author, in this case `function`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionRequestFunctionMessageRole {
         #[serde(rename = "function")]
         Function,
@@ -4274,7 +4692,8 @@ pub mod components {
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestFunctionMessageContent> for String {
+    impl ::std::convert::TryFrom<ChatCompletionRequestFunctionMessageContent>
+    for String {
         type Error = ChatCompletionRequestFunctionMessageContent;
         /// # Errors
         ///
@@ -4292,8 +4711,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for ChatCompletionRequestFunctionMessageContent
-    {
+    for ChatCompletionRequestFunctionMessageContent {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionRequestFunctionMessageContent::ChatCompletionRequestFunctionMessageContentVariant1(
                 value,
@@ -4301,8 +4719,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestFunctionMessageContent>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionRequestFunctionMessageContent;
         /// # Errors
         ///
@@ -4329,14 +4746,14 @@ pub mod components {
         /// The name of the function to call.
         pub name: String,
     }
-    impl ::std::convert::From<ChatCompletionRequestDeveloperMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestDeveloperMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestDeveloperMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestDeveloperMessage(value)
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
-        for ChatCompletionRequestDeveloperMessage
-    {
+    for ChatCompletionRequestDeveloperMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4346,19 +4763,21 @@ pub mod components {
             value: ChatCompletionRequestMessage,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionRequestMessage::ChatCompletionRequestDeveloperMessage(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionRequestMessage::ChatCompletionRequestDeveloperMessage(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionRequestSystemMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestSystemMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestSystemMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestSystemMessage(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestMessage> for ChatCompletionRequestSystemMessage {
+    impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
+    for ChatCompletionRequestSystemMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4368,19 +4787,21 @@ pub mod components {
             value: ChatCompletionRequestMessage,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionRequestMessage::ChatCompletionRequestSystemMessage(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionRequestMessage::ChatCompletionRequestSystemMessage(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionRequestUserMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestUserMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestUserMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestUserMessage(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestMessage> for ChatCompletionRequestUserMessage {
+    impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
+    for ChatCompletionRequestUserMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4397,14 +4818,14 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionRequestAssistantMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestAssistantMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestAssistantMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(value)
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
-        for ChatCompletionRequestAssistantMessage
-    {
+    for ChatCompletionRequestAssistantMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4414,19 +4835,21 @@ pub mod components {
             value: ChatCompletionRequestMessage,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionRequestToolMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestToolMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestToolMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestToolMessage(value)
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionRequestMessage> for ChatCompletionRequestToolMessage {
+    impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
+    for ChatCompletionRequestToolMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4443,14 +4866,14 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<ChatCompletionRequestFunctionMessage> for ChatCompletionRequestMessage {
+    impl ::std::convert::From<ChatCompletionRequestFunctionMessage>
+    for ChatCompletionRequestMessage {
         fn from(value: ChatCompletionRequestFunctionMessage) -> Self {
             ChatCompletionRequestMessage::ChatCompletionRequestFunctionMessage(value)
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionRequestMessage>
-        for ChatCompletionRequestFunctionMessage
-    {
+    for ChatCompletionRequestFunctionMessage {
         type Error = ChatCompletionRequestMessage;
         /// # Errors
         ///
@@ -4460,15 +4883,15 @@ pub mod components {
             value: ChatCompletionRequestMessage,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                ChatCompletionRequestMessage::ChatCompletionRequestFunctionMessage(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                ChatCompletionRequestMessage::ChatCompletionRequestFunctionMessage(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
-    #[serde(tag = "role")]
+    #[serde(untagged)]
     pub enum ChatCompletionRequestMessage {
         ChatCompletionRequestDeveloperMessage(ChatCompletionRequestDeveloperMessage),
         ChatCompletionRequestSystemMessage(ChatCompletionRequestSystemMessage),
@@ -4478,12 +4901,21 @@ pub mod components {
         ChatCompletionRequestFunctionMessage(ChatCompletionRequestFunctionMessage),
     }
     /// The type of location approximation. Always `approximate`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionRequestWebSearchOptionsUserLocationType {
         #[serde(rename = "approximate")]
         Approximate,
     }
-    impl ::std::fmt::Display for CreateChatCompletionRequestWebSearchOptionsUserLocationType {
+    impl ::std::fmt::Display
+    for CreateChatCompletionRequestWebSearchOptionsUserLocationType {
         fn fmt(&self, __f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match self {
                 Self::Approximate => ::std::write!(__f, "approximate"),
@@ -4504,7 +4936,9 @@ pub mod components {
     pub struct CreateChatCompletionRequestWebSearchOptions {
         #[serde(skip_serializing_if = "Option::is_none")]
         /// Approximate location parameters for the search.
-        pub user_location: Option<CreateChatCompletionRequestWebSearchOptionsUserLocation>,
+        pub user_location: Option<
+            CreateChatCompletionRequestWebSearchOptionsUserLocation,
+        >,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub search_context_size: Option<WebSearchContextSize>,
     }
@@ -4525,12 +4959,14 @@ pub mod components {
         ResponseFormatJsonSchema(ResponseFormatJsonSchema),
         ResponseFormatJsonObject(ResponseFormatJsonObject),
     }
-    impl ::std::convert::From<ResponseFormatText> for CreateChatCompletionRequestResponseFormat {
+    impl ::std::convert::From<ResponseFormatText>
+    for CreateChatCompletionRequestResponseFormat {
         fn from(value: ResponseFormatText) -> Self {
             CreateChatCompletionRequestResponseFormat::ResponseFormatText(value)
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionRequestResponseFormat> for ResponseFormatText {
+    impl ::std::convert::TryFrom<CreateChatCompletionRequestResponseFormat>
+    for ResponseFormatText {
         type Error = CreateChatCompletionRequestResponseFormat;
         /// # Errors
         ///
@@ -4547,14 +4983,14 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<ResponseFormatJsonSchema> for CreateChatCompletionRequestResponseFormat {
+    impl ::std::convert::From<ResponseFormatJsonSchema>
+    for CreateChatCompletionRequestResponseFormat {
         fn from(value: ResponseFormatJsonSchema) -> Self {
             CreateChatCompletionRequestResponseFormat::ResponseFormatJsonSchema(value)
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestResponseFormat>
-        for ResponseFormatJsonSchema
-    {
+    for ResponseFormatJsonSchema {
         type Error = CreateChatCompletionRequestResponseFormat;
         /// # Errors
         ///
@@ -4564,21 +5000,21 @@ pub mod components {
             value: CreateChatCompletionRequestResponseFormat,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                CreateChatCompletionRequestResponseFormat::ResponseFormatJsonSchema(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                CreateChatCompletionRequestResponseFormat::ResponseFormatJsonSchema(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
-    impl ::std::convert::From<ResponseFormatJsonObject> for CreateChatCompletionRequestResponseFormat {
+    impl ::std::convert::From<ResponseFormatJsonObject>
+    for CreateChatCompletionRequestResponseFormat {
         fn from(value: ResponseFormatJsonObject) -> Self {
             CreateChatCompletionRequestResponseFormat::ResponseFormatJsonObject(value)
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestResponseFormat>
-        for ResponseFormatJsonObject
-    {
+    for ResponseFormatJsonObject {
         type Error = CreateChatCompletionRequestResponseFormat;
         /// # Errors
         ///
@@ -4588,16 +5024,24 @@ pub mod components {
             value: CreateChatCompletionRequestResponseFormat,
         ) -> ::std::result::Result<Self, Self::Error> {
             match value {
-                CreateChatCompletionRequestResponseFormat::ResponseFormatJsonObject(inner) => {
-                    ::std::result::Result::Ok(inner)
-                }
+                CreateChatCompletionRequestResponseFormat::ResponseFormatJsonObject(
+                    inner,
+                ) => ::std::result::Result::Ok(inner),
                 other => ::std::result::Result::Err(other),
             }
         }
     }
     /// Specifies the output audio format. Must be one of `wav`, `mp3`, `flac`,
     /// `opus`, or `pcm16`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionRequestAudioFormat {
         #[serde(rename = "wav")]
         Wav,
@@ -4642,12 +5086,14 @@ pub mod components {
     pub enum CreateChatCompletionRequestPrediction {
         PredictionContent(PredictionContent),
     }
-    impl ::std::convert::From<PredictionContent> for CreateChatCompletionRequestPrediction {
+    impl ::std::convert::From<PredictionContent>
+    for CreateChatCompletionRequestPrediction {
         fn from(value: PredictionContent) -> Self {
             CreateChatCompletionRequestPrediction::PredictionContent(value)
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionRequestPrediction> for PredictionContent {
+    impl ::std::convert::TryFrom<CreateChatCompletionRequestPrediction>
+    for PredictionContent {
         type Error = CreateChatCompletionRequestPrediction;
         /// # Errors
         ///
@@ -4675,7 +5121,8 @@ pub mod components {
             CreateChatCompletionRequestTools::ChatCompletionTool(value)
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionRequestTools> for ChatCompletionTool {
+    impl ::std::convert::TryFrom<CreateChatCompletionRequestTools>
+    for ChatCompletionTool {
         type Error = CreateChatCompletionRequestTools;
         /// # Errors
         ///
@@ -4692,12 +5139,14 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<CustomToolChatCompletions> for CreateChatCompletionRequestTools {
+    impl ::std::convert::From<CustomToolChatCompletions>
+    for CreateChatCompletionRequestTools {
         fn from(value: CustomToolChatCompletions) -> Self {
             CreateChatCompletionRequestTools::CustomToolChatCompletions(value)
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionRequestTools> for CustomToolChatCompletions {
+    impl ::std::convert::TryFrom<CreateChatCompletionRequestTools>
+    for CustomToolChatCompletions {
         type Error = CreateChatCompletionRequestTools;
         /// # Errors
         ///
@@ -4715,7 +5164,15 @@ pub mod components {
         }
     }
     /// `none` means the model will not call a function and instead generates a message. `auto` means the model can pick between generating a message or calling a function.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionRequestFunctionCallVariant0 {
         #[serde(rename = "none")]
         None,
@@ -4755,8 +5212,7 @@ pub mod components {
         ChatCompletionFunctionCallOption(ChatCompletionFunctionCallOption),
     }
     impl ::std::convert::From<CreateChatCompletionRequestFunctionCallVariant0>
-        for CreateChatCompletionRequestFunctionCall
-    {
+    for CreateChatCompletionRequestFunctionCall {
         fn from(value: CreateChatCompletionRequestFunctionCallVariant0) -> Self {
             CreateChatCompletionRequestFunctionCall::CreateChatCompletionRequestFunctionCallVariant0(
                 value,
@@ -4764,8 +5220,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestFunctionCall>
-        for CreateChatCompletionRequestFunctionCallVariant0
-    {
+    for CreateChatCompletionRequestFunctionCallVariant0 {
         type Error = CreateChatCompletionRequestFunctionCall;
         /// # Errors
         ///
@@ -4783,15 +5238,15 @@ pub mod components {
         }
     }
     impl ::std::convert::From<ChatCompletionFunctionCallOption>
-        for CreateChatCompletionRequestFunctionCall
-    {
+    for CreateChatCompletionRequestFunctionCall {
         fn from(value: ChatCompletionFunctionCallOption) -> Self {
-            CreateChatCompletionRequestFunctionCall::ChatCompletionFunctionCallOption(value)
+            CreateChatCompletionRequestFunctionCall::ChatCompletionFunctionCallOption(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionRequestFunctionCall>
-        for ChatCompletionFunctionCallOption
-    {
+    for ChatCompletionFunctionCallOption {
         type Error = CreateChatCompletionRequestFunctionCall;
         /// # Errors
         ///
@@ -4834,7 +5289,9 @@ pub mod components {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub service_tier: Option<ServiceTier>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub prompt_cache_retention: Option<CreateChatCompletionRequestPromptCacheRetention>,
+        pub prompt_cache_retention: Option<
+            CreateChatCompletionRequestPromptCacheRetention,
+        >,
         /// A list of messages comprising the conversation so far. Depending on the
         /// [model](/docs/models) you use, different message types (modalities) are
         /// supported, like [text](/docs/guides/text-generation),
@@ -4975,7 +5432,15 @@ pub mod components {
     /// `length` if the maximum number of tokens specified in the request was reached,
     /// `content_filter` if content was omitted due to a flag from our content filters,
     /// `tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionResponseChoicesFinishReason {
         #[serde(rename = "stop")]
         Stop,
@@ -5029,14 +5494,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ChatCompletionResponseMessageContent {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ChatCompletionResponseMessageContent {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionResponseMessageContent::ChatCompletionResponseMessageContentVariant1(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionResponseMessageContent> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ChatCompletionResponseMessageContent>
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionResponseMessageContent;
         /// # Errors
         ///
@@ -5083,14 +5550,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ChatCompletionResponseMessageRefusal {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ChatCompletionResponseMessageRefusal {
         fn from(value: Option<::serde_json::Value>) -> Self {
             ChatCompletionResponseMessageRefusal::ChatCompletionResponseMessageRefusalVariant1(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionResponseMessageRefusal> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ChatCompletionResponseMessageRefusal>
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionResponseMessageRefusal;
         /// # Errors
         ///
@@ -5108,7 +5577,15 @@ pub mod components {
         }
     }
     /// The type of the URL citation. Always `url_citation`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionResponseMessageAnnotationsType {
         #[serde(rename = "url_citation")]
         UrlCitation,
@@ -5141,7 +5618,15 @@ pub mod components {
         pub url_citation: ChatCompletionResponseMessageAnnotationsUrlCitation,
     }
     /// The role of the author of this message.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum ChatCompletionResponseMessageRole {
         #[serde(rename = "assistant")]
         Assistant,
@@ -5181,19 +5666,21 @@ pub mod components {
     #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
     #[serde(untagged)]
     pub enum ChatCompletionResponseMessageAudio {
-        ChatCompletionResponseMessageAudioVariant0(ChatCompletionResponseMessageAudioVariant0),
+        ChatCompletionResponseMessageAudioVariant0(
+            ChatCompletionResponseMessageAudioVariant0,
+        ),
         ChatCompletionResponseMessageAudioVariant1(Option<::serde_json::Value>),
     }
     impl ::std::convert::From<ChatCompletionResponseMessageAudioVariant0>
-        for ChatCompletionResponseMessageAudio
-    {
+    for ChatCompletionResponseMessageAudio {
         fn from(value: ChatCompletionResponseMessageAudioVariant0) -> Self {
-            ChatCompletionResponseMessageAudio::ChatCompletionResponseMessageAudioVariant0(value)
+            ChatCompletionResponseMessageAudio::ChatCompletionResponseMessageAudioVariant0(
+                value,
+            )
         }
     }
     impl ::std::convert::TryFrom<ChatCompletionResponseMessageAudio>
-        for ChatCompletionResponseMessageAudioVariant0
-    {
+    for ChatCompletionResponseMessageAudioVariant0 {
         type Error = ChatCompletionResponseMessageAudio;
         /// # Errors
         ///
@@ -5210,12 +5697,16 @@ pub mod components {
             }
         }
     }
-    impl ::std::convert::From<Option<::serde_json::Value>> for ChatCompletionResponseMessageAudio {
+    impl ::std::convert::From<Option<::serde_json::Value>>
+    for ChatCompletionResponseMessageAudio {
         fn from(value: Option<::serde_json::Value>) -> Self {
-            ChatCompletionResponseMessageAudio::ChatCompletionResponseMessageAudioVariant1(value)
+            ChatCompletionResponseMessageAudio::ChatCompletionResponseMessageAudioVariant1(
+                value,
+            )
         }
     }
-    impl ::std::convert::TryFrom<ChatCompletionResponseMessageAudio> for Option<::serde_json::Value> {
+    impl ::std::convert::TryFrom<ChatCompletionResponseMessageAudio>
+    for Option<::serde_json::Value> {
         type Error = ChatCompletionResponseMessageAudio;
         /// # Errors
         ///
@@ -5263,17 +5754,16 @@ pub mod components {
         ),
     }
     impl ::std::convert::From<Vec<ChatCompletionTokenLogprob>>
-        for CreateChatCompletionResponseChoicesLogprobsVariant0Content
-    {
+    for CreateChatCompletionResponseChoicesLogprobsVariant0Content {
         fn from(value: Vec<ChatCompletionTokenLogprob>) -> Self {
             CreateChatCompletionResponseChoicesLogprobsVariant0Content::CreateChatCompletionResponseChoicesLogprobsVariant0ContentVariant0(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobsVariant0Content>
-        for Vec<ChatCompletionTokenLogprob>
-    {
+    impl ::std::convert::TryFrom<
+        CreateChatCompletionResponseChoicesLogprobsVariant0Content,
+    > for Vec<ChatCompletionTokenLogprob> {
         type Error = CreateChatCompletionResponseChoicesLogprobsVariant0Content;
         /// # Errors
         ///
@@ -5291,17 +5781,16 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateChatCompletionResponseChoicesLogprobsVariant0Content
-    {
+    for CreateChatCompletionResponseChoicesLogprobsVariant0Content {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionResponseChoicesLogprobsVariant0Content::CreateChatCompletionResponseChoicesLogprobsVariant0ContentVariant1(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobsVariant0Content>
-        for Option<::serde_json::Value>
-    {
+    impl ::std::convert::TryFrom<
+        CreateChatCompletionResponseChoicesLogprobsVariant0Content,
+    > for Option<::serde_json::Value> {
         type Error = CreateChatCompletionResponseChoicesLogprobsVariant0Content;
         /// # Errors
         ///
@@ -5329,17 +5818,16 @@ pub mod components {
         ),
     }
     impl ::std::convert::From<Vec<ChatCompletionTokenLogprob>>
-        for CreateChatCompletionResponseChoicesLogprobsVariant0Refusal
-    {
+    for CreateChatCompletionResponseChoicesLogprobsVariant0Refusal {
         fn from(value: Vec<ChatCompletionTokenLogprob>) -> Self {
             CreateChatCompletionResponseChoicesLogprobsVariant0Refusal::CreateChatCompletionResponseChoicesLogprobsVariant0RefusalVariant0(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobsVariant0Refusal>
-        for Vec<ChatCompletionTokenLogprob>
-    {
+    impl ::std::convert::TryFrom<
+        CreateChatCompletionResponseChoicesLogprobsVariant0Refusal,
+    > for Vec<ChatCompletionTokenLogprob> {
         type Error = CreateChatCompletionResponseChoicesLogprobsVariant0Refusal;
         /// # Errors
         ///
@@ -5357,17 +5845,16 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateChatCompletionResponseChoicesLogprobsVariant0Refusal
-    {
+    for CreateChatCompletionResponseChoicesLogprobsVariant0Refusal {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionResponseChoicesLogprobsVariant0Refusal::CreateChatCompletionResponseChoicesLogprobsVariant0RefusalVariant1(
                 value,
             )
         }
     }
-    impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobsVariant0Refusal>
-        for Option<::serde_json::Value>
-    {
+    impl ::std::convert::TryFrom<
+        CreateChatCompletionResponseChoicesLogprobsVariant0Refusal,
+    > for Option<::serde_json::Value> {
         type Error = CreateChatCompletionResponseChoicesLogprobsVariant0Refusal;
         /// # Errors
         ///
@@ -5399,8 +5886,7 @@ pub mod components {
         CreateChatCompletionResponseChoicesLogprobsVariant1(Option<::serde_json::Value>),
     }
     impl ::std::convert::From<CreateChatCompletionResponseChoicesLogprobsVariant0>
-        for CreateChatCompletionResponseChoicesLogprobs
-    {
+    for CreateChatCompletionResponseChoicesLogprobs {
         fn from(value: CreateChatCompletionResponseChoicesLogprobsVariant0) -> Self {
             CreateChatCompletionResponseChoicesLogprobs::CreateChatCompletionResponseChoicesLogprobsVariant0(
                 value,
@@ -5408,8 +5894,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobs>
-        for CreateChatCompletionResponseChoicesLogprobsVariant0
-    {
+    for CreateChatCompletionResponseChoicesLogprobsVariant0 {
         type Error = CreateChatCompletionResponseChoicesLogprobs;
         /// # Errors
         ///
@@ -5427,8 +5912,7 @@ pub mod components {
         }
     }
     impl ::std::convert::From<Option<::serde_json::Value>>
-        for CreateChatCompletionResponseChoicesLogprobs
-    {
+    for CreateChatCompletionResponseChoicesLogprobs {
         fn from(value: Option<::serde_json::Value>) -> Self {
             CreateChatCompletionResponseChoicesLogprobs::CreateChatCompletionResponseChoicesLogprobsVariant1(
                 value,
@@ -5436,8 +5920,7 @@ pub mod components {
         }
     }
     impl ::std::convert::TryFrom<CreateChatCompletionResponseChoicesLogprobs>
-        for Option<::serde_json::Value>
-    {
+    for Option<::serde_json::Value> {
         type Error = CreateChatCompletionResponseChoicesLogprobs;
         /// # Errors
         ///
@@ -5467,7 +5950,15 @@ pub mod components {
         pub logprobs: CreateChatCompletionResponseChoicesLogprobs,
     }
     /// The object type, which is always `chat.completion`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        ::serde::Serialize,
+        ::serde::Deserialize
+    )]
     pub enum CreateChatCompletionResponseObject {
         #[serde(rename = "chat.completion")]
         ChatCompletion,
@@ -5545,7 +6036,9 @@ pub mod operations {
                 /// operation. Outer slice encodes OR alternatives; inner
                 /// slice encodes AND requirements within one alternative.
                 /// Empty outer slice means "public, no auth required".
-                pub const SECURITY: &'static [&'static [&'static str]] = &[&["ApiKeyAuth"]];
+                pub const SECURITY: &'static [&'static [&'static str]] = &[
+                    &["ApiKeyAuth"],
+                ];
                 /// Wraps this request with an `Accept` header override.
                 ///
                 /// The generated [`::toac::MakeRequest`] impl auto-emits an
@@ -5553,7 +6046,10 @@ pub mod operations {
                 /// declared in the spec. Use this method to steer content
                 /// negotiation to one specific type (for example, asking
                 /// for `text/event-stream` to land on a streaming branch).
-                pub fn with_accept(self, accept: ::http::HeaderValue) -> ::toac::WithAccept<Self> {
+                pub fn with_accept(
+                    self,
+                    accept: ::http::HeaderValue,
+                ) -> ::toac::WithAccept<Self> {
                     ::toac::WithAccept::new(self, accept)
                 }
             }
@@ -5570,10 +6066,11 @@ pub mod operations {
                         let mut __builder = ::http::Request::builder()
                             .method(::http::Method::GET)
                             .uri(__path);
-                        __builder = __builder.header(
-                            ::http::header::ACCEPT,
-                            ::http::HeaderValue::from_static("application/json"),
-                        );
+                        __builder = __builder
+                            .header(
+                                ::http::header::ACCEPT,
+                                ::http::HeaderValue::from_static("application/json"),
+                            );
                         let mut __request = __builder
                             .body(::toac::body::Body::empty())
                             .expect("valid generated HTTP request");
@@ -5623,10 +6120,8 @@ pub mod operations {
                     Output = ::std::result::Result<Self, Self::Error>,
                 > + ::std::marker::Send
                 where
-                    __B: ::http_body::Body<Data = ::bytes::Bytes>
-                        + ::std::marker::Send
-                        + ::std::marker::Sync
-                        + 'static,
+                    __B: ::http_body::Body<Data = ::bytes::Bytes> + ::std::marker::Send
+                        + ::std::marker::Sync + 'static,
                     __B::Error: ::std::convert::Into<::toac::BoxError>,
                 {
                     async move {
@@ -5636,11 +6131,14 @@ pub mod operations {
                         match __status.as_u16() {
                             200u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status200(__value),
@@ -5648,11 +6146,14 @@ pub mod operations {
                             }
                             400u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status400(__value),
@@ -5660,11 +6161,14 @@ pub mod operations {
                             }
                             401u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status401(__value),
@@ -5672,11 +6176,14 @@ pub mod operations {
                             }
                             403u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status403(__value),
@@ -5684,11 +6191,14 @@ pub mod operations {
                             }
                             404u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status404(__value),
@@ -5696,11 +6206,14 @@ pub mod operations {
                             }
                             413u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status413(__value),
@@ -5708,11 +6221,14 @@ pub mod operations {
                             }
                             429u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status429(__value),
@@ -5720,11 +6236,14 @@ pub mod operations {
                             }
                             500u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status500(__value),
@@ -5732,11 +6251,14 @@ pub mod operations {
                             }
                             502u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status502(__value),
@@ -5744,11 +6266,14 @@ pub mod operations {
                             }
                             503u16 => {
                                 let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                let __value = ::toac::body::codec::decode_body(&__decoder, __body)
+                                let __value = ::toac::body::codec::decode_body(
+                                        &__decoder,
+                                        __body,
+                                    )
                                     .await
-                                    .map_err(|e| {
-                                        ::toac::DecodeError::Codec(::std::convert::Into::into(e))
-                                    })?;
+                                    .map_err(|e| ::toac::DecodeError::Codec(
+                                        ::std::convert::Into::into(e),
+                                    ))?;
                                 return ::std::result::Result::Ok(Self {
                                     headers: __headers,
                                     body: ResponseBody::Status503(__value),
@@ -5757,9 +6282,9 @@ pub mod operations {
                             _ => {}
                         }
                         ::std::mem::drop(__body);
-                        return ::std::result::Result::Err(::toac::DecodeError::UnexpectedStatus(
-                            __status,
-                        ));
+                        return ::std::result::Result::Err(
+                            ::toac::DecodeError::UnexpectedStatus(__status),
+                        );
                     }
                 }
             }
@@ -5773,24 +6298,24 @@ pub mod operations {
             pub mod post {
                 #[derive(Debug, Clone, PartialEq)]
                 /** # **Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)
-                to take advantage of the latest OpenAI platform features. Compare
-                [Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).
+to take advantage of the latest OpenAI platform features. Compare
+[Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).
 
-                ---
+---
 
-                Creates a model response for the given chat conversation. Learn more in the
-                [text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),
-                and [audio](/docs/guides/audio) guides.
+Creates a model response for the given chat conversation. Learn more in the
+[text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),
+and [audio](/docs/guides/audio) guides.
 
-                Parameter support can differ depending on the model used to generate the
-                response, particularly for newer reasoning models. Parameters that are only
-                supported for reasoning models are noted below. For the current state of
-                unsupported parameters in reasoning models,
-                [refer to the reasoning guide](/docs/guides/reasoning).
+Parameter support can differ depending on the model used to generate the
+response, particularly for newer reasoning models. Parameters that are only
+supported for reasoning models are noted below. For the current state of
+unsupported parameters in reasoning models,
+[refer to the reasoning guide](/docs/guides/reasoning).
 
-                Returns a chat completion object, or a streamed sequence of chat completion
-                chunk objects if the request is streamed.
-                */
+Returns a chat completion object, or a streamed sequence of chat completion
+chunk objects if the request is streamed.
+*/
                 pub struct Request {
                     pub body: crate::wire::openai::components::CreateChatCompletionRequest,
                 }
@@ -5806,7 +6331,9 @@ pub mod operations {
                     /// operation. Outer slice encodes OR alternatives; inner
                     /// slice encodes AND requirements within one alternative.
                     /// Empty outer slice means "public, no auth required".
-                    pub const SECURITY: &'static [&'static [&'static str]] = &[&["ApiKeyAuth"]];
+                    pub const SECURITY: &'static [&'static [&'static str]] = &[
+                        &["ApiKeyAuth"],
+                    ];
                     /// Wraps this request with an `Accept` header override.
                     ///
                     /// The generated [`::toac::MakeRequest`] impl auto-emits an
@@ -5834,12 +6361,13 @@ pub mod operations {
                             let mut __builder = ::http::Request::builder()
                                 .method(::http::Method::POST)
                                 .uri(__path);
-                            __builder = __builder.header(
-                                ::http::header::ACCEPT,
-                                ::http::HeaderValue::from_static(
-                                    "application/json, text/event-stream",
-                                ),
-                            );
+                            __builder = __builder
+                                .header(
+                                    ::http::header::ACCEPT,
+                                    ::http::HeaderValue::from_static(
+                                        "application/json, text/event-stream",
+                                    ),
+                                );
                             let mut __request = __builder
                                 .body(::toac::body::Body::empty())
                                 .expect("valid generated HTTP request");
@@ -5859,7 +6387,9 @@ pub mod operations {
                 }
                 pub enum ResponseBody {
                     ///OK
-                    Status200Json(crate::wire::openai::components::CreateChatCompletionResponse),
+                    Status200Json(
+                        crate::wire::openai::components::CreateChatCompletionResponse,
+                    ),
                     ///OK
                     Status200Sse(::toac::body::codec::sse::SseEventStream),
                     ///Bad Request — 请求体格式或字段无效。
@@ -5897,9 +6427,7 @@ pub mod operations {
                     > + ::std::marker::Send
                     where
                         __B: ::http_body::Body<Data = ::bytes::Bytes>
-                            + ::std::marker::Send
-                            + ::std::marker::Sync
-                            + 'static,
+                            + ::std::marker::Send + ::std::marker::Sync + 'static,
                         __B::Error: ::std::convert::Into<::toac::BoxError>,
                     {
                         async move {
@@ -5913,67 +6441,69 @@ pub mod operations {
                                     s.split(';').next().unwrap_or(s).trim().to_ascii_lowercase()
                                 });
                             match __status.as_u16() {
-                                200u16 => match __content_type.as_deref() {
-                                    ::std::option::Option::Some(__ct)
-                                        if __ct == "application/json" =>
-                                    {
-                                        let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                        let __value =
-                                            ::toac::body::codec::decode_body(&__decoder, __body)
+                                200u16 => {
+                                    match __content_type.as_deref() {
+                                        ::std::option::Option::Some(
+                                            __ct,
+                                        ) if __ct == "application/json" => {
+                                            let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
+                                            let __value = ::toac::body::codec::decode_body(
+                                                    &__decoder,
+                                                    __body,
+                                                )
                                                 .await
-                                                .map_err(|e| {
-                                                    ::toac::DecodeError::Codec(
-                                                        ::std::convert::Into::into(e),
-                                                    )
-                                                })?;
-                                        return ::std::result::Result::Ok(Self {
-                                            headers: __headers,
-                                            body: ResponseBody::Status200Json(__value),
-                                        });
-                                    }
-                                    ::std::option::Option::Some(__ct)
-                                        if __ct == "text/event-stream" =>
-                                    {
-                                        let __decoder = <::toac::body::codec::sse::SseDecoder as ::std::default::Default>::default();
-                                        let __value =
-                                            ::toac::body::codec::decode_body(&__decoder, __body)
+                                                .map_err(|e| ::toac::DecodeError::Codec(
+                                                    ::std::convert::Into::into(e),
+                                                ))?;
+                                            return ::std::result::Result::Ok(Self {
+                                                headers: __headers,
+                                                body: ResponseBody::Status200Json(__value),
+                                            });
+                                        }
+                                        ::std::option::Option::Some(
+                                            __ct,
+                                        ) if __ct == "text/event-stream" => {
+                                            let __decoder = <::toac::body::codec::sse::SseDecoder as ::std::default::Default>::default();
+                                            let __value = ::toac::body::codec::decode_body(
+                                                    &__decoder,
+                                                    __body,
+                                                )
                                                 .await
-                                                .map_err(|e| {
-                                                    ::toac::DecodeError::Codec(
-                                                        ::std::convert::Into::into(e),
-                                                    )
-                                                })?;
-                                        return ::std::result::Result::Ok(Self {
-                                            headers: __headers,
-                                            body: ResponseBody::Status200Sse(__value),
-                                        });
-                                    }
-                                    _ => {
-                                        let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                        let __value =
-                                            ::toac::body::codec::decode_body(&__decoder, __body)
+                                                .map_err(|e| ::toac::DecodeError::Codec(
+                                                    ::std::convert::Into::into(e),
+                                                ))?;
+                                            return ::std::result::Result::Ok(Self {
+                                                headers: __headers,
+                                                body: ResponseBody::Status200Sse(__value),
+                                            });
+                                        }
+                                        _ => {
+                                            let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
+                                            let __value = ::toac::body::codec::decode_body(
+                                                    &__decoder,
+                                                    __body,
+                                                )
                                                 .await
-                                                .map_err(|e| {
-                                                    ::toac::DecodeError::Codec(
-                                                        ::std::convert::Into::into(e),
-                                                    )
-                                                })?;
-                                        return ::std::result::Result::Ok(Self {
-                                            headers: __headers,
-                                            body: ResponseBody::Status200Json(__value),
-                                        });
+                                                .map_err(|e| ::toac::DecodeError::Codec(
+                                                    ::std::convert::Into::into(e),
+                                                ))?;
+                                            return ::std::result::Result::Ok(Self {
+                                                headers: __headers,
+                                                body: ResponseBody::Status200Json(__value),
+                                            });
+                                        }
                                     }
-                                },
+                                }
                                 400u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status400(__value),
@@ -5981,14 +6511,14 @@ pub mod operations {
                                 }
                                 401u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status401(__value),
@@ -5996,14 +6526,14 @@ pub mod operations {
                                 }
                                 403u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status403(__value),
@@ -6011,14 +6541,14 @@ pub mod operations {
                                 }
                                 404u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status404(__value),
@@ -6026,14 +6556,14 @@ pub mod operations {
                                 }
                                 413u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status413(__value),
@@ -6041,14 +6571,14 @@ pub mod operations {
                                 }
                                 429u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status429(__value),
@@ -6056,14 +6586,14 @@ pub mod operations {
                                 }
                                 500u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status500(__value),
@@ -6071,14 +6601,14 @@ pub mod operations {
                                 }
                                 502u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status502(__value),
@@ -6086,14 +6616,14 @@ pub mod operations {
                                 }
                                 503u16 => {
                                     let __decoder = <::toac::body::codec::json::JsonDecoder as ::std::default::Default>::default();
-                                    let __value =
-                                        ::toac::body::codec::decode_body(&__decoder, __body)
-                                            .await
-                                            .map_err(|e| {
-                                                ::toac::DecodeError::Codec(
-                                                    ::std::convert::Into::into(e),
-                                                )
-                                            })?;
+                                    let __value = ::toac::body::codec::decode_body(
+                                            &__decoder,
+                                            __body,
+                                        )
+                                        .await
+                                        .map_err(|e| ::toac::DecodeError::Codec(
+                                            ::std::convert::Into::into(e),
+                                        ))?;
                                     return ::std::result::Result::Ok(Self {
                                         headers: __headers,
                                         body: ResponseBody::Status503(__value),
@@ -6146,9 +6676,7 @@ pub mod security {
     impl AdminApiKeyAuthCredential {
         /// Builds a credential from a raw token value.
         pub fn new<T: ::std::convert::Into<::std::string::String>>(token: T) -> Self {
-            Self {
-                token: token.into(),
-            }
+            Self { token: token.into() }
         }
         fn as_runtime(&self) -> ::toac::security::BearerCredential {
             ::toac::security::BearerCredential {
@@ -6176,9 +6704,7 @@ pub mod security {
     impl ApiKeyAuthCredential {
         /// Builds a credential from a raw token value.
         pub fn new<T: ::std::convert::Into<::std::string::String>>(token: T) -> Self {
-            Self {
-                token: token.into(),
-            }
+            Self { token: token.into() }
         }
         fn as_runtime(&self) -> ::toac::security::BearerCredential {
             ::toac::security::BearerCredential {
@@ -6225,8 +6751,9 @@ pub mod security {
         where
             T: ::std::convert::Into<::std::string::String>,
         {
-            self.admin_api_key_auth =
-                ::std::option::Option::Some(AdminApiKeyAuthCredential::new(token));
+            self.admin_api_key_auth = ::std::option::Option::Some(
+                AdminApiKeyAuthCredential::new(token),
+            );
             self
         }
         /// Provides the Bearer token for this scheme.
@@ -6234,15 +6761,14 @@ pub mod security {
         where
             T: ::std::convert::Into<::std::string::String>,
         {
-            self.api_key_auth = ::std::option::Option::Some(ApiKeyAuthCredential::new(token));
+            self.api_key_auth = ::std::option::Option::Some(
+                ApiKeyAuthCredential::new(token),
+            );
             self
         }
         /// Finalises into an [`AuthConfig`].
         pub fn build(self) -> AuthConfig {
-            let Self {
-                admin_api_key_auth,
-                api_key_auth,
-            } = self;
+            let Self { admin_api_key_auth, api_key_auth } = self;
             AuthConfig {
                 admin_api_key_auth,
                 api_key_auth,
@@ -6259,14 +6785,14 @@ pub mod security {
                 if requirements.is_empty() {
                     return ::std::result::Result::Ok(req);
                 }
-                let mut __chosen: ::std::option::Option<&'static [&'static str]> =
-                    ::std::option::Option::None;
+                let mut __chosen: ::std::option::Option<&'static [&'static str]> = ::std::option::Option::None;
                 for __alt in requirements {
                     let mut __can_satisfy = true;
                     let mut __matched_any = false;
                     for __scheme in __alt.iter().copied() {
                         if __scheme == "AdminApiKeyAuth" {
-                            let ::std::option::Option::Some(_) = &self.admin_api_key_auth else {
+                            let ::std::option::Option::Some(_) = &self.admin_api_key_auth
+                            else {
                                 __can_satisfy = false;
                                 break;
                             };
@@ -6291,22 +6817,27 @@ pub mod security {
                     }
                 }
                 let ::std::option::Option::Some(__alt) = __chosen else {
-                    return ::std::result::Result::Err(::std::convert::Into::into(::std::format!(
-                        "no configured credentials satisfy {:?}",
-                        requirements,
-                    )));
+                    return ::std::result::Result::Err(
+                        ::std::convert::Into::into(
+                            ::std::format!(
+                                "no configured credentials satisfy {:?}", requirements,
+                            ),
+                        ),
+                    );
                 };
                 let mut __req = req;
                 for __scheme in __alt.iter().copied() {
                     if __scheme == "AdminApiKeyAuth" {
-                        let ::std::option::Option::Some(__cred) = &self.admin_api_key_auth else {
+                        let ::std::option::Option::Some(__cred) = &self
+                            .admin_api_key_auth else {
                             continue;
                         };
                         __req = ::toac::SecurityCredential::apply(__cred, __req).await?;
                         continue;
                     }
                     if __scheme == "ApiKeyAuth" {
-                        let ::std::option::Option::Some(__cred) = &self.api_key_auth else {
+                        let ::std::option::Option::Some(__cred) = &self.api_key_auth
+                        else {
                             continue;
                         };
                         __req = ::toac::SecurityCredential::apply(__cred, __req).await?;
