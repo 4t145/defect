@@ -1,0 +1,23 @@
+[package]
+name = "defect-llm-codegen"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# 角色：把 crates/llm/oas/*.yaml 翻译成 crates/llm/src/wire/*.rs。
+# 不进运行期依赖图（不在 default-members 里），平时 cargo build 不会编。
+# 用法：
+#   cargo run -p defect-llm-codegen -- anthropic
+#   cargo run -p defect-llm-codegen -- openai
+
+[[bin]]
+name = "defect-llm-codegen"
+path = "src/main.rs"
+
+[dependencies]
+toac-build.workspace = true
+oas3.workspace = true
+prettyplease.workspace = true
+syn.workspace = true
+anyhow.workspace = true

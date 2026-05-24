@@ -1,0 +1,142 @@
+openapi: 3.1.0
+info:
+  title: Anthropic Messages API
+  description: |
+    本地裁剪版的 Anthropic Messages API OAS。仅保留 defect-llm 实际用到
+    的端点（v0：/v1/models；后续会加 /v1/messages）。每次 Anthropic
+    上游加字段时，手动同步对应 schema 段。
+  version: "2023-06-01"
+
+servers:
+  - url: https://api.anthropic.com
+    description: Anthropic 官方 API endpoint。base_url 由 provider 在
+      运行期通过 `ANTHROPIC_BASE_URL` env 覆盖（codegen 不参与）。
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: |
+        Anthropic 鉴权头。`anthropic-version: 2023-06-01` 由 provider
+        层在每个请求里硬编码注入，不在 OAS 里声明（写在 OAS 里
+        codegen 会出可空字段，每请求多一次 builder 调用，无意义）。
+
+  schemas:
+    ModelInfo:
+      type: object
+      required: [type, id, display_name, created_at]
+      properties:
+        type:
+          type: string
+          enum: [model]
+          description: 固定字面量 "model"。
+        id:
+          type: string
+          description: 模型 id，例如 "claude-3-5-sonnet-20241022"。
+        display_name:
+          type: string
+          description: 人类可读名称。
+        created_at:
+          type: string
+          format: date-time
+          description: ISO-8601 时间戳。
+
+    ListModelsResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelInfo"
+        has_more:
+          type: boolean
+          description: 后面还有页时为 true。
+        first_id:
+          type: string
+          nullable: true
+        last_id:
+          type: string
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          enum: [error]
+        error:
+          type: object
+          required: [type, message]
+          properties:
+            type:
+              type: string
+              description: |
+                Anthropic 错误分类：invalid_request_error /
+                authentication_error / permission_error /
+                not_found_error / rate_limit_error /
+                api_error / overloaded_error。
+            message:
+              type: string
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /v1/models:
+    get:
+      operationId: listModels
+      summary: List available models
+      description: 返回当前 API key 可见的全部模型清单。分页字段 v0 不用。
+      parameters:
+        - name: before_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: after_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListModelsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
