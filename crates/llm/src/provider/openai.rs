@@ -2,4 +2,715 @@
 //!
 //! 通过 `base_url` 参数对接 OpenAI 官方与所有遵循 Chat Completions
 //! 协议的兼容服务（DeepSeek、Qwen、本地 vllm 等）。bearer token + SSE。
-//! v0 骨架阶段，待 LlmProvider 实现填充。
+//!
+//! 设计与字段对应详见 `docs/outbound/llm-openai.md`。
+
+use std::collections::HashMap;
+use std::env;
+use std::sync::Arc;
+use std::time::Duration;
+
+use defect_agent::error::BoxError;
+use defect_agent::llm::{
+    Capabilities, CompletionRequest, FeatureSupport, LlmProvider, ModelCapabilityOverrides,
+    ModelInfo, ProtocolId, ProviderError, ProviderErrorKind, ProviderInfo, ProviderStream,
+    RateLimitScope,
+};
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use http::HeaderValue;
+use toac::{ApiClient, CallError, MakeRequest, Operation, Request as ToacRequest};
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
+use tower::Service;
+
+use crate::protocol::openai_chat;
+use crate::wire::openai::{
+    components as wire,
+    operations::{chat::completions as chat_completions, models},
+    security,
+};
+
+const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const API_KEY_ENV: &str = "OPENAI_API_KEY";
+const BASE_URL_ENV: &str = "OPENAI_BASE_URL";
+const ORG_ENV: &str = "OPENAI_ORG";
+const PROJECT_ENV: &str = "OPENAI_PROJECT";
+
+type Http = client_util::client::HyperHttpsClient<toac::body::Body>;
+type Client = ApiClient<Http>;
+
+/// OpenAI provider 配置。
+///
+/// `api_key` / `base_url` / `organization` / `project` 可显式提供，否则
+/// 从环境变量读取。`capabilities_override` 用于兼容厂商（如 DeepSeek
+/// 把 `thinking` 翻成 `Supported`）。
+#[derive(Debug, Default, Clone)]
+pub struct OpenAiConfig {
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub organization: Option<String>,
+    pub project: Option<String>,
+    pub capabilities_override: Option<Capabilities>,
+}
+
+impl OpenAiConfig {
+    pub fn from_env() -> Self {
+        Self {
+            api_key: env::var(API_KEY_ENV).ok(),
+            base_url: env::var(BASE_URL_ENV).ok(),
+            organization: env::var(ORG_ENV).ok(),
+            project: env::var(PROJECT_ENV).ok(),
+            capabilities_override: None,
+        }
+    }
+
+    pub fn with_capabilities_override(mut self, caps: Capabilities) -> Self {
+        self.capabilities_override = Some(caps);
+        self
+    }
+
+    fn resolve_api_key(&self) -> Result<String, ProviderError> {
+        self.api_key
+            .clone()
+            .or_else(|| env::var(API_KEY_ENV).ok())
+            .ok_or_else(|| {
+                ProviderError::new(ProviderErrorKind::AuthMissing {
+                    var_hint: Some(API_KEY_ENV.into()),
+                })
+            })
+    }
+
+    fn resolve_base_url(&self) -> String {
+        self.base_url
+            .clone()
+            .or_else(|| env::var(BASE_URL_ENV).ok())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_owned())
+    }
+
+    fn resolve_org(&self) -> Option<String> {
+        self.organization.clone().or_else(|| env::var(ORG_ENV).ok())
+    }
+
+    fn resolve_project(&self) -> Option<String> {
+        self.project.clone().or_else(|| env::var(PROJECT_ENV).ok())
+    }
+}
+
+pub struct OpenAiProvider {
+    client: Client,
+    info: ProviderInfo,
+    capabilities: Capabilities,
+    organization: Option<String>,
+    project: Option<String>,
+    models: Arc<RwLock<Option<Vec<ModelInfo>>>>,
+}
+
+impl std::fmt::Debug for OpenAiProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiProvider")
+            .field("info", &self.info)
+            .field("capabilities", &self.capabilities)
+            .field("organization", &self.organization)
+            .field("project", &self.project)
+            .finish_non_exhaustive()
+    }
+}
+
+impl OpenAiProvider {
+    pub fn new(config: OpenAiConfig) -> Result<Self, ProviderError> {
+        let token = config.resolve_api_key()?;
+        let base_url = config.resolve_base_url();
+        let organization = config.resolve_org();
+        let project = config.resolve_project();
+        let capabilities = config
+            .capabilities_override
+            .unwrap_or(default_openai_capabilities());
+
+        let auth = security::AuthConfig::builder().api_key_auth(token).build();
+        let http = client_util::client::build_https_client::<toac::body::Body>()
+            .map_err(|e| ProviderError::new(ProviderErrorKind::Transport(BoxError::new(e))))?;
+        let client = ApiClient::new(http, base_url).with_auth(auth);
+
+        Ok(Self {
+            client,
+            info: ProviderInfo {
+                vendor: "openai".into(),
+                protocol: ProtocolId::OpenAiChat,
+                display_name: "OpenAI Chat Completions".into(),
+            },
+            capabilities,
+            organization,
+            project,
+            models: Arc::default(),
+        })
+    }
+}
+
+fn default_openai_capabilities() -> Capabilities {
+    Capabilities {
+        tool_calls: FeatureSupport::Supported,
+        parallel_tool_calls: FeatureSupport::Supported,
+        thinking: FeatureSupport::Unsupported,
+        vision: FeatureSupport::Supported,
+        prompt_cache: FeatureSupport::Supported,
+    }
+}
+
+impl LlmProvider for OpenAiProvider {
+    fn info(&self) -> ProviderInfo {
+        self.info.clone()
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        self.capabilities
+    }
+
+    fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
+        async move {
+            if let Some(cached) = self.models.read().await.clone() {
+                return Ok(cached);
+            }
+
+            let request = self.with_openai_headers(models::get::Request {});
+            let resp = self
+                .client
+                .clone()
+                .call(request)
+                .await
+                .map_err(call_error_to_provider)?;
+            let request_id = extract_request_id(&resp.headers);
+
+            let list = match resp.body {
+                models::get::ResponseBody::Status200(l) => l,
+                models::get::ResponseBody::Status400(e) => {
+                    return Err(error_response(400, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status401(e) => {
+                    return Err(error_response(401, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status403(e) => {
+                    return Err(error_response(403, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status404(e) => {
+                    return Err(error_response(404, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status413(e) => {
+                    return Err(error_response(413, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status429(e) => {
+                    return Err(error_response(429, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status500(e) => {
+                    return Err(error_response(500, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status502(e) => {
+                    return Err(error_response(502, &e, None).with_request_id_opt(request_id));
+                }
+                models::get::ResponseBody::Status503(e) => {
+                    return Err(error_response(503, &e, None).with_request_id_opt(request_id));
+                }
+            };
+
+            let upstream: Vec<ModelInfo> = list
+                .data
+                .into_iter()
+                .map(|m| ModelInfo {
+                    id: m.id,
+                    display_name: None,
+                    context_window: None,
+                    max_output_tokens: None,
+                    deprecated: false,
+                    capabilities_overrides: ModelCapabilityOverrides::default(),
+                })
+                .collect();
+
+            let merged = merge_with_hardcoded(upstream);
+
+            *self.models.write().await = Some(merged.clone());
+            Ok(merged)
+        }
+        .boxed()
+    }
+
+    fn model_info(&self, model_id: &str) -> Option<ModelInfo> {
+        if let Some(cached) = self
+            .models
+            .try_read()
+            .ok()
+            .and_then(|g| g.as_ref()?.iter().find(|m| m.id == model_id).cloned())
+        {
+            return Some(cached);
+        }
+        hardcoded_lookup(model_id)
+    }
+
+    fn complete(
+        &self,
+        req: CompletionRequest,
+        cancel: CancellationToken,
+    ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
+        async move {
+            let body = openai_chat::encode_request(&req);
+            let op = self
+                .with_openai_headers(chat_completions::post::Request { body })
+                .with_accept(HeaderValue::from_static("text/event-stream"));
+
+            let mut client = self.client.clone();
+            let resp = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    return Err(ProviderError::new(ProviderErrorKind::Canceled));
+                }
+                r = client.call(op) => r.map_err(call_error_to_provider)?,
+            };
+            let request_id = extract_request_id(&resp.headers);
+            let retry_after = extract_retry_after(&resp.headers);
+
+            let stream = match resp.body {
+                chat_completions::post::ResponseBody::Status200Sse(s) => s,
+                chat_completions::post::ResponseBody::Status200Json(_) => {
+                    return Err(ProviderError::new(ProviderErrorKind::ProtocolViolation {
+                        hint: "server returned application/json despite Accept: text/event-stream"
+                            .into(),
+                    })
+                    .with_request_id_opt(request_id));
+                }
+                chat_completions::post::ResponseBody::Status400(e) => {
+                    return Err(
+                        error_response(400, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status401(e) => {
+                    return Err(
+                        error_response(401, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status403(e) => {
+                    return Err(
+                        error_response(403, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status404(e) => {
+                    return Err(
+                        error_response(404, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status413(e) => {
+                    return Err(
+                        error_response(413, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status429(e) => {
+                    return Err(
+                        error_response(429, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status500(e) => {
+                    return Err(
+                        error_response(500, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status502(e) => {
+                    return Err(
+                        error_response(502, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+                chat_completions::post::ResponseBody::Status503(e) => {
+                    return Err(
+                        error_response(503, &e, retry_after).with_request_id_opt(request_id)
+                    );
+                }
+            };
+
+            let decoded = openai_chat::decode_stream(stream, cancel);
+            Ok(Box::pin(decoded) as ProviderStream)
+        }
+        .boxed()
+    }
+}
+
+impl OpenAiProvider {
+    fn with_openai_headers<Op>(&self, op: Op) -> WithOpenAiHeaders<Op> {
+        WithOpenAiHeaders {
+            op,
+            organization: self.organization.clone(),
+            project: self.project.clone(),
+        }
+    }
+}
+
+// ---------- header injection adapter ------------------------------------
+
+/// 给 op 装上可选的 `OpenAI-Organization` / `OpenAI-Project` 头。
+///
+/// toac 的生成 op 不接受任意 header，参考 [`toac::WithAccept`] 自起一个
+/// 最小 wrapper。空值不发，发出空字符串会被有些兼容厂商当成非法值。
+#[derive(Debug, Clone)]
+struct WithOpenAiHeaders<Op> {
+    op: Op,
+    organization: Option<String>,
+    project: Option<String>,
+}
+
+impl<Op> MakeRequest for WithOpenAiHeaders<Op>
+where
+    Op: MakeRequest + Send,
+{
+    type Error = Op::Error;
+
+    #[allow(clippy::manual_async_fn)]
+    fn make_request(
+        self,
+    ) -> impl std::future::Future<Output = Result<ToacRequest, Self::Error>> + Send {
+        async move {
+            let mut req = self.op.make_request().await?;
+            if let Some(org) = self.organization.as_deref()
+                && let Ok(v) = HeaderValue::from_str(org)
+            {
+                req.headers_mut()
+                    .insert(http::HeaderName::from_static("openai-organization"), v);
+            }
+            if let Some(project) = self.project.as_deref()
+                && let Ok(v) = HeaderValue::from_str(project)
+            {
+                req.headers_mut()
+                    .insert(http::HeaderName::from_static("openai-project"), v);
+            }
+            Ok(req)
+        }
+    }
+}
+
+impl<Op> Operation for WithOpenAiHeaders<Op>
+where
+    Op: Operation + Send,
+{
+    type Response = Op::Response;
+}
+
+impl<Op> WithOpenAiHeaders<Op> {
+    fn with_accept(self, accept: HeaderValue) -> toac::WithAccept<Self> {
+        toac::WithAccept::new(self, accept)
+    }
+}
+
+// ---------- response header helpers -------------------------------------
+
+/// OpenAI 用 `x-request-id` header 传 request id；HTTP/2 / 部分代理还会
+/// 顺便带 `request-id`，两者都收。
+fn extract_request_id(headers: &http::HeaderMap) -> Option<String> {
+    headers
+        .get("x-request-id")
+        .or_else(|| headers.get("request-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
+/// 解析 RFC 7231 `Retry-After` header。OpenAI 在 429 上偶尔发整数秒，
+/// 也偶尔发 HTTP-date；先按整数秒尝试，date 形态留给上层退避兜底。
+fn extract_retry_after(headers: &http::HeaderMap) -> Option<Duration> {
+    let v = headers.get(http::header::RETRY_AFTER)?.to_str().ok()?;
+    v.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+trait WithRequestIdOpt {
+    fn with_request_id_opt(self, id: Option<String>) -> Self;
+}
+
+impl WithRequestIdOpt for ProviderError {
+    fn with_request_id_opt(self, id: Option<String>) -> Self {
+        match id {
+            Some(s) => self.with_request_id(s),
+            None => self,
+        }
+    }
+}
+
+// ---------- error mapping -----------------------------------------------
+
+fn call_error_to_provider<E>(err: CallError<E>) -> ProviderError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    match err {
+        CallError::Encode(e) => ProviderError::new(ProviderErrorKind::BadRequest {
+            hint: Some(e.to_string()),
+        }),
+        CallError::Auth(e) => ProviderError::new(ProviderErrorKind::AuthMalformed {
+            hint: Some(e.to_string()),
+        }),
+        CallError::Transport(e) => {
+            ProviderError::new(ProviderErrorKind::Transport(BoxError::new(e)))
+        }
+        CallError::Decode(e) => ProviderError::new(ProviderErrorKind::Malformed(BoxError::new(e))),
+    }
+}
+
+/// 把 wire `OpenAiErrorResponse` + HTTP status 翻成 [`ProviderError`]。
+///
+/// 映射表见 `docs/outbound/llm-openai.md` §6。
+fn error_response(
+    status: u16,
+    e: &wire::OpenAiErrorResponse,
+    retry_after: Option<Duration>,
+) -> ProviderError {
+    let message = e.error.message.clone();
+    let upstream_type = e.error.r#type.as_str();
+    let upstream_code = e.error.code.as_deref();
+    let upstream_param = e.error.param.as_deref();
+    let kind = match (status, upstream_type, upstream_code) {
+        (401, _, _) => ProviderErrorKind::AuthRejected {
+            hint: Some(message),
+        },
+        (400, _, Some("context_length_exceeded")) => ProviderErrorKind::ContextOverflow {
+            used: None,
+            limit: None,
+        },
+        (400, "invalid_request_error", _)
+            if upstream_param == Some("max_tokens")
+                || upstream_param == Some("max_completion_tokens")
+                || contains_max_tokens(&message) =>
+        {
+            ProviderErrorKind::MaxTokensInvalid {
+                requested: None,
+                limit: None,
+            }
+        }
+        (400, _, _) => ProviderErrorKind::BadRequest {
+            hint: Some(message),
+        },
+        (403, _, Some("insufficient_quota")) => ProviderErrorKind::QuotaExceeded {
+            hint: Some(message),
+        },
+        (403, _, _) => ProviderErrorKind::AuthRejected {
+            hint: Some(message),
+        },
+        (404, _, Some("model_not_found")) => ProviderErrorKind::ModelNotFound {
+            model: extract_model(&message).unwrap_or_else(|| "unknown".into()),
+        },
+        (404, _, _) => ProviderErrorKind::ServerError {
+            status: Some(404),
+            hint: Some(message),
+        },
+        (413, _, _) => ProviderErrorKind::BadRequest {
+            hint: Some("payload too large".into()),
+        },
+        (429, t, _) => ProviderErrorKind::RateLimit {
+            retry_after,
+            scope: rate_limit_scope_from(t, &message),
+        },
+        (s, _, _) if s >= 500 => ProviderErrorKind::ServerError {
+            status: Some(s),
+            hint: Some(message),
+        },
+        (s, _, _) => ProviderErrorKind::ServerError {
+            status: Some(s),
+            hint: Some(message),
+        },
+    };
+    ProviderError::new(kind)
+}
+
+fn rate_limit_scope_from(upstream_type: &str, message: &str) -> RateLimitScope {
+    let lower = message.to_ascii_lowercase();
+    if upstream_type.contains("tokens_per_min")
+        || lower.contains("tokens per min")
+        || lower.contains("tpm")
+    {
+        RateLimitScope::Tpm
+    } else if upstream_type.contains("requests_per_min")
+        || lower.contains("requests per min")
+        || lower.contains("rpm")
+    {
+        RateLimitScope::Rpm
+    } else {
+        RateLimitScope::Unspecified
+    }
+}
+
+fn contains_max_tokens(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("max_tokens")
+        || lower.contains("max tokens")
+        || lower.contains("max_completion_tokens")
+}
+
+/// 从形如 `model: gpt-foo` 这类错误信息里抠 model id。
+/// 抠不出就返回 None，调用方按 `"unknown"` 兜底。
+fn extract_model(msg: &str) -> Option<String> {
+    let lower = msg.to_ascii_lowercase();
+    let idx = lower.find("model")?;
+    let tail = &msg[idx + "model".len()..];
+    let trimmed = tail.trim_start_matches(|c: char| {
+        c.is_whitespace() || c == ':' || c == '=' || c == '"' || c == '\''
+    });
+    let end = trimmed
+        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ',')
+        .unwrap_or(trimmed.len());
+    let candidate = &trimmed[..end];
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_owned())
+    }
+}
+
+// ---------- hardcoded model table ---------------------------------------
+
+/// v0 硬编码模型表。
+///
+/// `/v1/models` 在不同兼容厂商间 schema 差异大（OpenAI 只发 `id` /
+/// `created` / `owned_by`，DeepSeek 不发 `context_window`，Together 字段
+/// 又不一样），但 `id` 全家共享。这里维护一份小表，给已知 OpenAI 系列
+/// 模型补 `context_window` / `max_output_tokens` / `capabilities_overrides`
+/// 等常用字段；上游列表里没有的 id 直接保持 `None`。
+///
+/// 表项数据来源：OpenAI 官方文档 + DeepSeek 官方文档（截至 2025）。
+fn hardcoded_models() -> &'static [HardcodedModel] {
+    &[
+        HardcodedModel {
+            id: "gpt-4o-mini",
+            display_name: Some("GPT-4o mini"),
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            overrides: None,
+        },
+        HardcodedModel {
+            id: "gpt-4o",
+            display_name: Some("GPT-4o"),
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            overrides: None,
+        },
+        HardcodedModel {
+            id: "o1-mini",
+            display_name: Some("o1-mini"),
+            context_window: Some(128_000),
+            max_output_tokens: Some(65_536),
+            overrides: Some(ModelCapabilityOverrides {
+                thinking: Some(FeatureSupport::Supported),
+                vision: None,
+                prompt_cache: None,
+                parallel_tool_calls: Some(FeatureSupport::Unsupported),
+            }),
+        },
+        HardcodedModel {
+            id: "o1",
+            display_name: Some("o1"),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            overrides: Some(ModelCapabilityOverrides {
+                thinking: Some(FeatureSupport::Supported),
+                vision: None,
+                prompt_cache: None,
+                parallel_tool_calls: Some(FeatureSupport::Unsupported),
+            }),
+        },
+        HardcodedModel {
+            id: "o3-mini",
+            display_name: Some("o3-mini"),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            overrides: Some(ModelCapabilityOverrides {
+                thinking: Some(FeatureSupport::Supported),
+                vision: None,
+                prompt_cache: None,
+                parallel_tool_calls: Some(FeatureSupport::Unsupported),
+            }),
+        },
+        HardcodedModel {
+            id: "o3",
+            display_name: Some("o3"),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            overrides: Some(ModelCapabilityOverrides {
+                thinking: Some(FeatureSupport::Supported),
+                vision: None,
+                prompt_cache: None,
+                parallel_tool_calls: Some(FeatureSupport::Unsupported),
+            }),
+        },
+        HardcodedModel {
+            id: "deepseek-chat",
+            display_name: Some("DeepSeek Chat"),
+            context_window: Some(64_000),
+            max_output_tokens: Some(8_192),
+            overrides: None,
+        },
+        HardcodedModel {
+            id: "deepseek-reasoner",
+            display_name: Some("DeepSeek Reasoner"),
+            context_window: Some(64_000),
+            max_output_tokens: Some(8_192),
+            overrides: Some(ModelCapabilityOverrides {
+                thinking: Some(FeatureSupport::Supported),
+                vision: None,
+                prompt_cache: None,
+                parallel_tool_calls: None,
+            }),
+        },
+    ]
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HardcodedModel {
+    id: &'static str,
+    display_name: Option<&'static str>,
+    context_window: Option<u64>,
+    max_output_tokens: Option<u64>,
+    overrides: Option<ModelCapabilityOverrides>,
+}
+
+fn hardcoded_lookup(model_id: &str) -> Option<ModelInfo> {
+    hardcoded_models()
+        .iter()
+        .find(|m| m.id == model_id)
+        .map(|m| ModelInfo {
+            id: m.id.to_owned(),
+            display_name: m.display_name.map(str::to_owned),
+            context_window: m.context_window,
+            max_output_tokens: m.max_output_tokens,
+            deprecated: false,
+            capabilities_overrides: m.overrides.unwrap_or_default(),
+        })
+}
+
+/// 用上游列表为骨干，硬编码表为补丁：上游有的就拿上游 id，硬编码表
+/// 命中就把元信息往里补；硬编码表里有但上游没列出的 id 也合进来
+/// （兼容厂商 `/v1/models` 缺失主流模型时的兜底）。
+fn merge_with_hardcoded(upstream: Vec<ModelInfo>) -> Vec<ModelInfo> {
+    let mut by_id: HashMap<String, ModelInfo> =
+        upstream.into_iter().map(|m| (m.id.clone(), m)).collect();
+    for hc in hardcoded_models() {
+        let entry = by_id.entry(hc.id.to_owned()).or_insert_with(|| ModelInfo {
+            id: hc.id.to_owned(),
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            deprecated: false,
+            capabilities_overrides: ModelCapabilityOverrides::default(),
+        });
+        if entry.display_name.is_none() {
+            entry.display_name = hc.display_name.map(str::to_owned);
+        }
+        if entry.context_window.is_none() {
+            entry.context_window = hc.context_window;
+        }
+        if entry.max_output_tokens.is_none() {
+            entry.max_output_tokens = hc.max_output_tokens;
+        }
+        if let Some(overrides) = hc.overrides {
+            let cur = entry.capabilities_overrides;
+            entry.capabilities_overrides = ModelCapabilityOverrides {
+                thinking: cur.thinking.or(overrides.thinking),
+                vision: cur.vision.or(overrides.vision),
+                prompt_cache: cur.prompt_cache.or(overrides.prompt_cache),
+                parallel_tool_calls: cur.parallel_tool_calls.or(overrides.parallel_tool_calls),
+            };
+        }
+    }
+    let mut merged: Vec<ModelInfo> = by_id.into_values().collect();
+    merged.sort_by(|a, b| a.id.cmp(&b.id));
+    merged
+}

@@ -21,3 +21,5 @@ oas3.workspace = true
 prettyplease.workspace = true
 syn.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true

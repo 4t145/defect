@@ -6,11 +6,16 @@
 //! cargo run -p defect-llm-codegen -- openai      # 仅生成 OpenAI
 //! cargo run -p defect-llm-codegen --             # 两个一起
 //! cargo run -p defect-llm-codegen -- --check     # CI 守门：重生不允许有 diff
+//!
+//! cargo run -p defect-llm-codegen -- openai-strip \
+//!     --upstream ../tower-openapi-client/examples/openai-openapi/openapi.yaml
 //! ```
 //!
 //! 这里**不**走 `toac_build::Builder::emit()`——它强制写 `$OUT_DIR`，
 //! 期望被 `build.rs` 调。我们要把生成的代码 commit 进仓库，所以走底
 //! 层 `toac_build::build_with` + 自己 `prettyplease::unparse` + 写文件。
+
+mod openai_strip;
 
 use std::{
     env, fs,
@@ -42,8 +47,15 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let workspace_root = workspace_root()?;
     let args: Vec<String> = env::args().skip(1).collect();
+
+    // `openai-strip` 是上游同步专用的 subcommand，走单独 pipeline——
+    // 不读 oas/openai.yaml 而是 fork 上游 spec 到那里。
+    if args.first().map(String::as_str) == Some("openai-strip") {
+        return openai_strip::run(&args[1..]);
+    }
+
+    let workspace_root = workspace_root()?;
     let check = args.iter().any(|a| a == "--check");
     let names: Vec<&str> = args
         .iter()
@@ -157,7 +169,7 @@ fn ensure_parent(p: &Path) -> Result<()> {
 /// 推断 workspace 根：优先 `CARGO_WORKSPACE_DIR`（cargo 1.79+ 注入），
 /// 否则从 `CARGO_MANIFEST_DIR` 上溯到含 `Cargo.toml` 且声明 `[workspace]`
 /// 的目录。
-fn workspace_root() -> Result<PathBuf> {
+pub(crate) fn workspace_root() -> Result<PathBuf> {
     if let Some(p) = env::var_os("CARGO_WORKSPACE_DIR") {
         return Ok(PathBuf::from(p));
     }

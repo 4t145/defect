@@ -4,4 +4,5 @@
 //! 模型元信息表 / vendor-specific tracing。每家厂商一个子模块。
 
 pub mod anthropic;
+pub mod deepseek;
 pub mod openai;

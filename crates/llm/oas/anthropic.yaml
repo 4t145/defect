@@ -2276,9 +2276,10 @@ components:
       description: |
         message_start 事件携带的 Message 体；与 /v1/messages 同步返回的
         Message 几乎相同，但 content 总是空数组（在后续 content_block_*
-        事件里逐步填充），且 stop_reason / stop_details 为 null。usage
-        在此事件里只有 input_tokens / output_tokens 是有效的。
-      required: [id, type, role, content, model, stop_reason, stop_sequence, usage]
+        事件里逐步填充），且 stop_reason / stop_details / stop_sequence
+        为 null。usage 在此事件里只有 input_tokens / output_tokens 是
+        有效的，其余字段在 message_delta 时再补。
+      required: [id, type, role, content, model, usage]
       properties:
         id: { type: string }
         type:
@@ -2295,6 +2296,7 @@ components:
           $ref: "#/components/schemas/Model"
         stop_reason:
           $ref: "#/components/schemas/StopReason"
+          nullable: true
         stop_sequence:
           type: string
           nullable: true
@@ -2409,10 +2411,11 @@ components:
 
     MessageDeltaUpdate:
       type: object
-      required: [stop_reason, stop_sequence]
+      required: [stop_reason]
       description: |
-        message_delta 事件携带的 message 顶层增量。stop_reason/sequence
-        在 turn 收尾时填充。
+        message_delta 事件携带的 message 顶层增量。stop_reason 在 turn
+        收尾时必填；stop_sequence 仅在因 stop_sequences 命中而停止时填，
+        其余情况上游回 null（不传字段或传 null 都视为"未命中"）。
       properties:
         stop_reason:
           $ref: "#/components/schemas/StopReason"

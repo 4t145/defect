@@ -34,8 +34,10 @@
 | internal | 内置工具：grep / glob 检索                             | `docs/internal/tools-search.md`   | P1     | 未开始   |
 | internal | 会话持久化（jsonl，append-only，可 resume）            | `docs/internal/storage-jsonl.md`  | P1     | 未开始   |
 | outbound | LLM 模块两层架构（协议层 + 厂商层）总览                | `docs/outbound/llm.md`            | P0     | 已完成   |
-| outbound | Anthropic provider（messages API + 流式）              | `docs/outbound/llm-anthropic.md`  | P0     | 进行中   |
-| outbound | OpenAI 兼容 provider（chat completions + 流式）        | `docs/outbound/llm-openai.md`     | P0     | 进行中   |
+| outbound | Anthropic provider（messages API + 流式）              | `docs/outbound/llm-anthropic.md`  | P0     | 已完成   |
+| outbound | OpenAI 兼容 provider（chat completions + 流式）        | `docs/outbound/llm-openai.md`     | P0     | 已完成   |
+| outbound | LLM provider 集测（wiremock 离线 e2e，两家）           | `docs/outbound/llm-anthropic.md` §10 / `docs/outbound/llm-openai.md` §9 | P1 | 已完成   |
+| outbound | LLM provider 真端点 smoke（examples/，手动跑）         | —                                 | P2     | 已完成   |
 | outbound | HTTP 客户端基础设施（超时/重试/代理/UA）               | `docs/outbound/http.md`           | P1     | 未开始   |
 | outbound | tracing 接入（结构化日志 + EnvFilter）                 | `docs/outbound/tracing.md`        | P0     | 未开始   |
 | outbound | tracing OTLP exporter（导出到外部 collector）          | `docs/outbound/tracing-otlp.md`   | P2     | 未开始   |
