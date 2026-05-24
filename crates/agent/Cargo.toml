@@ -1,0 +1,20 @@
+[package]
+name = "defect-agent"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-client-protocol.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "macros", "rt", "rt-multi-thread", "time", "test-util"] }

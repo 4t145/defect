@@ -1,0 +1,53 @@
+//! provider 与模型的能力矩阵。
+//!
+//! 设计详见 `docs/internal/llm-trait.md` 第 5 节。
+
+use serde::{Deserialize, Serialize};
+
+/// provider 级能力矩阵。
+///
+/// 模型级差异由 [`ModelCapabilityOverrides`] 表达；主循环按需合并：
+/// 模型级 `Some(_)` 覆盖 provider 级，`None` 沿用 provider 级。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capabilities {
+    /// 工具调用（content_block 含 tool_use / tool_calls 字段）。
+    pub tool_calls: FeatureSupport,
+    /// 同一轮内并发多个 tool_use。
+    pub parallel_tool_calls: FeatureSupport,
+    /// 思考链。
+    pub thinking: FeatureSupport,
+    /// 多模态输入（图片）。
+    pub vision: FeatureSupport,
+    /// prompt cache。
+    pub prompt_cache: FeatureSupport,
+}
+
+/// 模型级覆写。`None` 表示沿用 provider 级 [`Capabilities`] 字段。
+///
+/// 字段集合按"现实中真的会按模型变化"的属性限定，不与 [`Capabilities`]
+/// 机械一一对应。后续如出现新差异点再加。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCapabilityOverrides {
+    pub thinking: Option<FeatureSupport>,
+    pub vision: Option<FeatureSupport>,
+    pub prompt_cache: Option<FeatureSupport>,
+    pub parallel_tool_calls: Option<FeatureSupport>,
+}
+
+/// 三态特性支持声明。
+///
+/// 选用三态而非 `bool` 是为了表达 [`FeatureSupport::PassthroughAsTool`]
+/// ——通过适配伪支持。即便 v0 没有产生此值的实现，从一开始定下三态
+/// 也比未来从 `bool` 升枚举省事。
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureSupport {
+    Supported,
+    Unsupported,
+    /// 通过适配伪支持。
+    ///
+    /// 例如某 provider 没原生 `web_search`，但 agent 把它包装成一个
+    /// 工具暴露给 LLM，借此"假装"支持。
+    PassthroughAsTool,
+}

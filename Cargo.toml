@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# 内部 crate 互相引用
+defect-agent = { path = "crates/agent" }
+defect-llm = { path = "crates/llm" }
+defect-tools = { path = "crates/tools" }
+defect-mcp = { path = "crates/mcp" }
+defect-sandbox = { path = "crates/sandbox" }
+defect-storage = { path = "crates/storage" }
+defect-config = { path = "crates/config" }
+defect-acp = { path = "crates/acp" }
+
+# 异步运行时
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std", "sync", "fs", "process", "signal", "time"] }
+tokio-util = { version = "0.7", default-features = false }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 错误处理与日志
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 并发数据结构
+dashmap = "6"
+
+# 协议与外部 SDK
+agent-client-protocol = "0.12"
+rmcp = { version = "1", features = ["client"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "rustls-native-certs", "stream", "http2"] }
