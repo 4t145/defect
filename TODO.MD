@@ -27,8 +27,8 @@
 | internal | Session 状态容器（消息历史、tool 注册表、配置）        | `docs/internal/session.md`        | P0     | 已完成   |
 | internal | Turn 主循环（LLM 调用 ↔ 工具执行编排）                 | `docs/internal/turn-loop.md`      | P0     | 已完成   |
 | internal | 错误类型分层（agent / provider / tool / sandbox）      | `docs/internal/errors.md`         | P0     | 已完成   |
-| internal | LLM thinking 多轮 round-trip（reasoning_content 回放）| `docs/internal/thinking-roundtrip.md` | P0 | 进行中   |
-| internal | 配置加载与合并（用户/项目/CLI 覆盖）                   | `docs/internal/config.md`         | P1     | 未开始   |
+| internal | LLM thinking 多轮 round-trip（reasoning_content 回放）| `docs/internal/thinking-roundtrip.md` | P0 | 已完成   |
+| internal | 配置加载与合并（用户/项目/CLI 覆盖）                   | `docs/internal/config.md`         | P1     | 进行中   |
 | internal | 沙箱策略决策器（read-only / auto / full + 路径白名单） | `docs/internal/sandbox-policy.md` | P0     | 已完成   |
 | internal | 内置工具：fs（read / write / edit）                    | `docs/internal/tools-fs.md`       | P0     | 已完成   |
 | internal | 内置工具：bash 执行                                    | `docs/internal/tools-bash.md`     | P0     | 已完成   |

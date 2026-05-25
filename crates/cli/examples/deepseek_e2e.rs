@@ -29,7 +29,7 @@ use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 use defect_tools::BashTool;
 
 const DEFAULT_PROMPT: &str = "Say hello in one short sentence, then stop.";
-const MODEL: &str = "deepseek-chat";
+const MODEL: &str = "deepseek-v4-flash";
 
 fn prompt_text() -> String {
     std::env::var("DEEPSEEK_E2E_PROMPT")

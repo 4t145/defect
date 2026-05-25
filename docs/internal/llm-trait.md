@@ -173,6 +173,13 @@ pub enum Role { User, Assistant }
 
 pub enum MessageContent {
     Text(String),
+    /// 上一轮模型产出的思考链，仅出现在 [`Role::Assistant`] 消息里。
+    /// 是否回放由 [`Capabilities::thinking_echo`] 决定（详见
+    /// [`thinking-roundtrip.md`](./thinking-roundtrip.md)）。`signature`
+    /// 仅 Anthropic extended thinking 使用，DeepSeek 等纯文本 echo 的
+    /// provider 这里为 [`None`]。同条 assistant message 内 `Thinking`
+    /// 必须排在 `Text` / `ToolUse` 之前——Anthropic wire 顺序约定。
+    Thinking { text: String, signature: Option<String> },
     /// 历史轮次的工具调用：发出请求时把上一轮 tool_use 与 tool_result
     /// 都放在 messages 里，让 provider 重建上下文。
     ToolUse { id: String, name: String, args: serde_json::Value },
@@ -301,7 +308,9 @@ pub struct Capabilities {
     pub parallel_tool_calls: FeatureSupport,
 
     /// 思考链（Anthropic extended thinking / DeepSeek reasoning_content
-    /// / o1-style）。
+    /// / o1-style）。回答"模型**会不会**产 thinking 内容"，即 codec 入流
+    /// 是否解码 `ThinkingDelta`；与 [`thinking_echo`](#thinking_echo) 配套
+    /// 但语义不同。
     pub thinking: FeatureSupport,
 
     /// 多模态输入（图片）。
@@ -309,6 +318,13 @@ pub struct Capabilities {
 
     /// prompt cache。
     pub prompt_cache: FeatureSupport,
+
+    /// thinking 内容回放策略——"产了 thinking 内容**该不该**回放给
+    /// 服务端"。`Required` 强制把上一轮 thinking 写进下一轮请求
+    /// （Anthropic extended thinking、DeepSeek-v4-pro），`Forbidden`
+    /// 直接丢弃（DeepSeek-R1、OpenAI o1 / o3 官方），`Optional` 服务端
+    /// 两种都容忍。详见 [`thinking-roundtrip.md`](./thinking-roundtrip.md)。
+    pub thinking_echo: ThinkingEcho,
 }
 
 /// 模型级覆写。`None` 表示沿用 provider 级 [`Capabilities`] 字段。
@@ -320,6 +336,20 @@ pub struct ModelCapabilityOverrides {
     pub vision: Option<FeatureSupport>,
     pub prompt_cache: Option<FeatureSupport>,
     pub parallel_tool_calls: Option<FeatureSupport>,
+    /// 让同一 provider 下不同模型表达不同回放策略——例如 DeepSeek
+    /// 把 v4 系列设为 Required，预留口子让未来 Forbidden 模型可以单独
+    /// 覆盖。
+    pub thinking_echo: Option<ThinkingEcho>,
+}
+
+#[non_exhaustive]
+pub enum ThinkingEcho {
+    /// 默认。回放会被服务端拒。
+    Forbidden,
+    /// 必须把上一轮 thinking 原样写进下一轮请求。
+    Required,
+    /// 服务端两种行为都容忍。
+    Optional,
 }
 
 #[non_exhaustive]

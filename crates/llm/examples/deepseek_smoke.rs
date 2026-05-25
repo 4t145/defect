@@ -7,15 +7,22 @@
 //!   cargo run -p defect-llm --example deepseek_smoke -- [scenario]
 //! ```
 //!
-//! `[scenario]` ∈ `list-models | text | tool | thinking | all`，默认 `all`。
+//! `[scenario]` ∈ `list-models | text | tool | thinking | thinking-tool | all`，
+//! 默认 `all`。
 //!
 //! 可选 env：
 //! - `DEEPSEEK_BASE_URL`：覆盖默认 `https://api.deepseek.com/v1`
-//! - `DEEPSEEK_MODEL`：覆盖默认模型 `deepseek-chat`
+//! - `DEEPSEEK_MODEL`：覆盖默认模型 `deepseek-v4-flash`
 //! - `RUST_LOG=defect_llm=debug` 打开协议层调试日志
 //!
-//! `thinking` 场景默认强制使用 `deepseek-reasoner` 跑——`deepseek-chat`
-//! 不发 `reasoning_content`，跑了也是 SKIP。
+//! `thinking-tool` 场景验证 thinking + tool_use 多轮 round-trip：
+//! v4 系列在 thinking 模式下要求把上一轮 `reasoning_content` 回放回去，
+//! 否则第二轮（送 tool_result 时）400
+//! "reasoning_content must be passed back to the API"。本场景跑一个会
+//! 触发工具调用的 prompt，agent core 在一个 turn 内自动闭环：第一轮
+//! LLM 出 thinking + tool_use → 工具执行 → 第二轮把 thinking + tool_result
+//! 一起送回。失败说明 [`MessageContent::Thinking`] 的 echo 路径没拼对。
+//! 模型不在 `list_models` 返回里时 SKIP，不 FAIL。
 
 mod common;
 
@@ -30,8 +37,7 @@ use common::{
     print_skip, run_turn_and_print, sampling_with_thinking, scenario_from_args,
 };
 
-const DEFAULT_MODEL: &str = "deepseek-chat";
-const REASONER_MODEL: &str = "deepseek-reasoner";
+const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 const THINKING_BUDGET_TOKENS: u32 = 2048;
 
 const TEXT_PROMPT: &str = "Say hello in one short sentence.";
@@ -39,6 +45,11 @@ const TOOL_PROMPT: &str = "Please call the `echo` tool with msg=\"hello from smo
      then briefly summarize what the tool returned.";
 const THINKING_PROMPT: &str = "Think step by step: a farmer has 17 sheep and all but 9 die. How many are left? \
      Show your reasoning briefly, then give the final number.";
+// 让模型必须先 thinking、必须用工具、再给文本——这样第二轮请求里
+// 的 assistant message 一定带 reasoning_content（否则服务端拒）。
+const THINKING_TOOL_PROMPT: &str = "Think briefly about which message to echo, then call \
+     the `echo` tool with msg=\"hello from thinking-tool\", and after it returns \
+     summarize what came back in one sentence.";
 
 #[tokio::main]
 async fn main() {
@@ -98,7 +109,8 @@ fn scenarios_for(name: &str) -> Vec<&'static str> {
         "text" => vec!["text"],
         "tool" => vec!["tool"],
         "thinking" => vec!["thinking"],
-        _ => vec!["list-models", "text", "tool", "thinking"],
+        "thinking-tool" => vec!["thinking-tool"],
+        _ => vec!["list-models", "text", "tool", "thinking", "thinking-tool"],
     }
 }
 
@@ -115,6 +127,7 @@ async fn run_scenario(label: &str, provider: Arc<dyn LlmProvider>, model: &str) 
         "text" => scenario_text(provider, model).await,
         "tool" => scenario_tool(provider, model).await,
         "thinking" => scenario_thinking(provider, model).await,
+        "thinking-tool" => scenario_thinking_tool_multi_turn(provider, model).await,
         other => Err(format!("unknown scenario {other}")),
     };
     match res {
@@ -161,13 +174,7 @@ async fn scenario_tool(
     provider: Arc<dyn LlmProvider>,
     model: &str,
 ) -> Result<Option<String>, String> {
-    // deepseek-reasoner 暂不支持 function calling；落到 deepseek-chat 上跑。
-    let tool_model = if model == REASONER_MODEL {
-        DEFAULT_MODEL
-    } else {
-        model
-    };
-    let session = build_session(provider, tool_model, SamplingParams::default()).await;
+    let session = build_session(provider, model, SamplingParams::default()).await;
     let (stop, _text, hits) = run_turn_and_print(session, TOOL_PROMPT)
         .await
         .map_err(|e| e.to_string())?;
@@ -183,20 +190,55 @@ async fn scenario_tool(
     Ok(None)
 }
 
+async fn scenario_thinking_tool_multi_turn(
+    provider: Arc<dyn LlmProvider>,
+    model: &str,
+) -> Result<Option<String>, String> {
+    let sampling = sampling_with_thinking(Some(THINKING_BUDGET_TOKENS));
+    let session = build_session(provider, model, sampling).await;
+    let (stop, text, hits) = match run_turn_and_print(session, THINKING_TOOL_PROMPT).await {
+        Ok(t) => t,
+        Err(e) => {
+            let msg = e.to_string();
+            // 模型未上线时 SKIP 而非 FAIL（避免 CI 因上游清单变动而红）。
+            if msg.contains("ModelNotFound") || msg.contains("model_not_found") {
+                return Ok(Some(format!(
+                    "model {model} not available on DeepSeek API; \
+                     override with DEEPSEEK_MODEL"
+                )));
+            }
+            return Err(msg);
+        }
+    };
+    if !matches!(stop, AcpStopReason::EndTurn) {
+        return Err(format!("unexpected stop reason: {stop:?}"));
+    }
+    if hits.started == 0 || hits.finished == 0 {
+        return Err(format!(
+            "expected at least one tool call (started={}, finished={})",
+            hits.started, hits.finished
+        ));
+    }
+    if hits.thought_text.trim().is_empty() {
+        return Err("no reasoning_content emitted by thinking-tool model; \
+             cannot verify echo path"
+            .to_string());
+    }
+    if text.trim().is_empty() {
+        return Err("empty assistant text after tool turn".to_string());
+    }
+    // 走到这里说明：第一轮带 thinking + tool_use → tool_result 注入 →
+    // 第二轮请求里 assistant message 必带 reasoning_content（否则
+    // v4 系列会在第二轮直接 400，run_turn 拿不到 EndTurn）。
+    Ok(None)
+}
+
 async fn scenario_thinking(
     provider: Arc<dyn LlmProvider>,
     model: &str,
 ) -> Result<Option<String>, String> {
-    // 强制用 reasoner——deepseek-chat 不发 reasoning_content，跑了不验证什么。
-    let thinking_model = REASONER_MODEL;
-    if model != REASONER_MODEL {
-        println!(
-            "(scenario thinking forces model={REASONER_MODEL}; \
-             configured model={model} ignored)"
-        );
-    }
     let sampling = sampling_with_thinking(Some(THINKING_BUDGET_TOKENS));
-    let session = build_session(provider, thinking_model, sampling).await;
+    let session = build_session(provider, model, sampling).await;
     let (stop, text, hits) = run_turn_and_print(session, THINKING_PROMPT)
         .await
         .map_err(|e| e.to_string())?;
@@ -208,7 +250,7 @@ async fn scenario_thinking(
     }
     if hits.thought_text.trim().is_empty() {
         return Ok(Some(format!(
-            "no reasoning_content emitted by {thinking_model}; \
+            "no reasoning_content emitted by {model}; \
              check upstream changed shape"
         )));
     }

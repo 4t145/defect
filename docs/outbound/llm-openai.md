@@ -45,6 +45,10 @@
 
 这两条迁到我们的 `scripts/llm-codegen` 里，每次 sync 时 strip + patch 一次性出 `oas/openai.yaml`。
 
+我们另外在 strip 阶段注入一条非标字段：
+
+3. **`ChatCompletionRequestAssistantMessage.reasoning_content`**（可选 nullable string）：OpenAI 官方 wire schema 不含此字段，但 DeepSeek-v4-pro / SiliconFlow 等兼容厂商在 thinking 模式下要求把上一轮 reasoning 文本**回放**给服务端（否则 400 `reasoning_content must be passed back to the API`）。strip 把它挂进 schema 后，protocol 层 encode 时按 [`Capabilities.thinking_echo`](../internal/llm-trait.md#5-capabilities) 决定是否填值；OpenAI 官方收到额外字段会忽略，不影响现有路径。实现位置：`scripts/llm-codegen/src/openai_strip.rs::inject_assistant_reasoning_content`，详见 [`thinking-roundtrip.md`](../internal/thinking-roundtrip.md) §4.2。
+
 ## 2. 鉴权
 
 ```
@@ -172,9 +176,21 @@ struct ToolCallSlot {
 
 ### 5.4 reasoning_content 的兼容厂商扩展点
 
-OpenAI 官方不发 `reasoning_content`；DeepSeek / SiliconFlow / 月之暗面等都用这个名字。我们**直接接受**——codec 看见就 emit `ThinkingDelta`，不报错。OpenAI 自己往 o1 演进上不再用 `delta.content` 而用 `delta.reasoning_content` 时，零修改。
+`reasoning_content` 是 OpenAI Chat 协议族里**双向**的兼容厂商扩展——入流（response）和出流（request）都要处理。
 
-`Capabilities` 的 `thinking` 字段对 OpenAI 默认报 `Unsupported`；DeepSeek base_url 时配置 `thinking: Supported`——通过 `OpenAiConfig` 在构造时传入 `Capabilities` 覆盖（构造时一次性配，不每请求判别）。
+**入流（decode）**：OpenAI 官方不发 `reasoning_content`；DeepSeek / SiliconFlow / 月之暗面等都用这个名字。我们**直接接受**——codec 看见就 emit `ThinkingDelta`，不报错。OpenAI 自己往 o1 演进上不再用 `delta.content` 而用 `delta.reasoning_content` 时，零修改。
+
+**出流（encode）**：上一轮 `MessageContent::Thinking { text, .. }` 是否回放进 `assistant.reasoning_content` 由 [`Capabilities.thinking_echo`](../internal/llm-trait.md#5-capabilities) 决定：
+
+| `thinking_echo` | encode 行为 |
+| --- | --- |
+| `Required` | 把所有 `Thinking { text }` 的文本拼起来写进 `reasoning_content`（DeepSeek v4 系列这条是必需的） |
+| `Forbidden` | 整块 `Thinking` 跳过，不写 `reasoning_content`（OpenAI 官方 / 默认） |
+| `Optional` | 同 `Required` |
+
+`echo_mode` 由 protocol 层从 `OpenAiConfig` 读取一次性配死，不每条消息判别。`signature` 字段在 OpenAI 路径上忽略（DeepSeek 不要、OpenAI 自己也不要）。详细设计见 [`thinking-roundtrip.md`](../internal/thinking-roundtrip.md) §4.2。
+
+`Capabilities` 的 `thinking` 字段对 OpenAI 默认报 `Unsupported`、`thinking_echo` 默认 `Forbidden`；DeepSeek base_url 时通过 `OpenAiConfig` 在构造时传入 `Capabilities` 覆盖（`thinking: Supported`），并按模型在 `HARDCODED_MODELS` 里设 `ModelCapabilityOverrides::thinking_echo`——`deepseek-v4-flash` / `deepseek-v4-pro` → `Required`。这层覆盖在构造期发生，不影响每请求判定。
 
 ## 6. 错误映射差异
 
@@ -218,7 +234,7 @@ fn list_models(&self) -> BoxFuture<...> {
 }
 ```
 
-`HARDCODED_MODELS` v0 列：`gpt-4o-mini`, `gpt-4o`, `o1-mini`, `o1`, `o3-mini`, `o3`, `deepseek-chat`, `deepseek-reasoner`。其余无表项，`context_window: None`。
+`HARDCODED_MODELS` v0 列：`gpt-4o-mini`, `gpt-4o`, `o1-mini`, `o1`, `o3-mini`, `o3`, `deepseek-v4-flash`, `deepseek-v4-pro`。其余无表项，`context_window: None`。
 
 兼容厂商的 `/v1/models` 字段在不同厂商间不一致（DeepSeek 多、Together 不全），共同字段只有 `id`——其余按 `None` 处理是当前最稳。
 

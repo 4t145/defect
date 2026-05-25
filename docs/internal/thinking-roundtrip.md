@@ -14,13 +14,14 @@
   thinking + tool_use；这一轮把 tool_result 送回模型时，必须把上一轮的
   `thinking` block（含 `signature`）原样回放，否则 Anthropic 拒收
   （400 `unexpected_thinking_signature_mismatch`）。
-- **DeepSeek v4-pro thinking + tool_use 多轮**：上一轮 assistant 出了
+- **DeepSeek v4 系列 thinking + tool_use 多轮**：上一轮 assistant 出了
   `reasoning_content` + `tool_calls`；这一轮请求里这条 assistant
   message 必须带 `reasoning_content` 字段，否则 DeepSeek 直接 400：
   > The `reasoning_content` in the thinking mode must be passed back to the API.
-- **DeepSeek-R1**（`deepseek-reasoner`）官方文档**禁止**回放
-  `reasoning_content`——回放反而 400。所以"回放 vs 不回放"是
-  per-provider / per-model 的开关，不是普世真理。
+
+  当前 v4-flash / v4-pro 都属于这一类。"回放 vs 不回放"是
+  per-provider / per-model 的开关，不是普世真理——OpenAI 官方 o1 / o3
+  这条路径上是 Forbidden。
 
 ## 1. 设计原则
 
@@ -35,7 +36,7 @@
    也不能反过来。
 3. **是否回放由 provider 决定，不由 thinking 字段本身决定**——
    `Capabilities` 上加一位 `thinking_echo`，protocol 层 encode 时按这位
-   做差异：Anthropic / DeepSeek-v4-pro 设 `Required`，DeepSeek-R1 / OpenAI
+   做差异：Anthropic / DeepSeek v4 系列设 `Required`，OpenAI
    官方 o1 / o3 设 `Forbidden`，未配置默认 `Forbidden`（保守）。
 4. **Signature 与 thinking text 同生共死**——不能只回放文本不带
    signature（Anthropic 直接拒），也不能只发 signature（无意义）。
@@ -54,7 +55,7 @@ pub enum MessageContent {
     /// 上一轮模型产出的思考链。仅出现在 [`Role::Assistant`] 消息里。
     ///
     /// `signature` 是 Anthropic extended thinking 的防伪签名：必须与
-    /// 文本同进同出。DeepSeek-v4-pro 等纯文本 echo 的 provider 这里
+    /// 文本同进同出。DeepSeek v4 系列等纯文本 echo 的 provider 这里
     /// 为 [`None`]。
     Thinking {
         text: String,
@@ -94,9 +95,8 @@ pub struct Capabilities {
     /// thinking 内容回放策略。
     ///
     /// `Required` —— 上一轮 assistant 的 thinking 必须出现在下一轮
-    /// 请求里（Anthropic extended thinking、DeepSeek-v4-pro）。
-    /// `Forbidden` —— 回放会被服务端拒（DeepSeek-R1、OpenAI o1 / o3
-    /// 官方）。
+    /// 请求里（Anthropic extended thinking、DeepSeek v4 系列）。
+    /// `Forbidden` —— 回放会被服务端拒（OpenAI o1 / o3 官方）。
     /// `Optional` —— 服务端容忍两种行为（暂未观察到此类）。
     pub thinking_echo: ThinkingEcho,
 }
@@ -121,8 +121,8 @@ impl Default for ThinkingEcho {
   路径。
 
 `ModelCapabilityOverrides` 同样加 `thinking_echo: Option<ThinkingEcho>`，
-让 DeepSeek 同一 provider 下 `deepseek-reasoner`（Forbidden）和
-`deepseek-v4-pro`（Required）能分别表达。
+让单 provider 下不同模型能各自配置 echo 行为（如未来出现 v4 系列以外
+的 forbidden 模型）。
 
 ## 4. Provider 层 encode 规则
 
@@ -213,12 +213,12 @@ pub struct OpenAiConfig {
 DeepSeek provider（`provider/deepseek.rs`）在 `DeepSeekProvider::new`
 里把：
 
-- `default_thinking_echo = ThinkingEcho::Forbidden`（兼容老 R1）
-- `model_thinking_echo` 中 `"deepseek-v4-pro"` → `Required`
-  （往后新模型默认走 Forbidden 直到验证通过）
+- `default_thinking_echo = ThinkingEcho::Forbidden`（保守兜底）
+- `model_thinking_echo` 中 `deepseek-v4-flash` / `deepseek-v4-pro` →
+  `Required`（往后新模型默认走 Forbidden 直到验证通过）
 
-写硬编码表的位置在 `provider/deepseek.rs::HARDCODED_MODELS`，与现有
-`context_window` 等一并维护。
+写硬编码表的位置在 `provider/openai.rs::hardcoded_models()`，与现有
+`context_window` 等一并维护（DeepSeek 复用 OpenAI provider）。
 
 Anthropic provider 全模型 `thinking_echo = Required`——extended
 thinking 只要开启就要回放。
@@ -255,9 +255,10 @@ thinking 只要开启就要回放。
      `{ type: "thinking", thinking: text, signature: s }`。
    - signature 为 None 时整块被跳过。
 3. **DeepSeek smoke** (`crates/llm/examples/deepseek_smoke.rs`)：
-   - 加 `scenario_thinking_tool_multi_turn` —— 用 `deepseek-v4-pro`
-     先让模型调一个工具，再把工具结果送回，验证第二轮请求**带**
-     `reasoning_content`，得到合法响应（不是上文那条 400）。
+   - 加 `scenario_thinking_tool_multi_turn` —— 用 `deepseek-v4-flash`
+     （或 `DEEPSEEK_MODEL` 覆盖到 v4-pro）先让模型调一个工具，再把工具
+     结果送回，验证第二轮请求**带** `reasoning_content`，得到合法响应
+     （不是上文那条 400）。
 
 ## 7. 与现有文档的关系
 

@@ -649,38 +649,33 @@ fn hardcoded_models() -> &'static [HardcodedModel] {
             }),
         },
         HardcodedModel {
-            id: "deepseek-chat",
-            display_name: Some("DeepSeek Chat"),
-            context_window: Some(64_000),
-            max_output_tokens: Some(8_192),
-            overrides: None,
-        },
-        HardcodedModel {
-            id: "deepseek-reasoner",
-            display_name: Some("DeepSeek Reasoner"),
-            context_window: Some(64_000),
-            max_output_tokens: Some(8_192),
+            id: "deepseek-v4-flash",
+            display_name: Some("DeepSeek v4 Flash"),
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(384_000),
             overrides: Some(ModelCapabilityOverrides {
                 thinking: Some(FeatureSupport::Supported),
                 vision: None,
                 prompt_cache: None,
                 parallel_tool_calls: None,
-                // R1 系列禁止回放 reasoning_content，按文档说会 400。
-                thinking_echo: Some(ThinkingEcho::Forbidden),
+                // v4-flash thinking 模式同 v4-pro：上一轮 reasoning_content
+                // 必须回放，否则 400 "must be passed back to the API"。
+                thinking_echo: Some(ThinkingEcho::Required),
             }),
         },
         HardcodedModel {
             id: "deepseek-v4-pro",
             display_name: Some("DeepSeek v4 Pro"),
-            context_window: Some(64_000),
-            max_output_tokens: Some(8_192),
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(384_000),
             overrides: Some(ModelCapabilityOverrides {
                 thinking: Some(FeatureSupport::Supported),
                 vision: None,
                 prompt_cache: None,
                 parallel_tool_calls: None,
-                // v4-pro thinking 模式必须把上一轮 reasoning_content 回放
-                // 回去，否则 400 "must be passed back to the API"。
+                // v4-pro 走 https://api.deepseek.com/anthropic 端点（Anthropic
+                // 协议），不走 /v1/chat/completions——这条 echo 配置仅在用户
+                // 把 v4-pro 接到 OpenAI 兼容路径时生效。
                 thinking_echo: Some(ThinkingEcho::Required),
             }),
         },

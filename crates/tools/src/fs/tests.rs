@@ -628,11 +628,13 @@ async fn case26_read_window_too_large_reports_too_large() {
 
     // 直接调后端层避免 ReadFileTool 的 limit clamp（默认 2000，单行 3 MiB
     // × 5 = 15 MiB > cap）
-    let res = h
-        .fs
-        .read_text(PathBuf::from("big.log"), Some(1), Some(5))
-        .await;
-    assert!(matches!(res, Err(defect_agent::fs::FsError::TooLarge { .. })));
+    let res =
+        h.fs.read_text(PathBuf::from("big.log"), Some(1), Some(5))
+            .await;
+    assert!(matches!(
+        res,
+        Err(defect_agent::fs::FsError::TooLarge { .. })
+    ));
 }
 
 #[tokio::test]

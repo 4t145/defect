@@ -22,6 +22,22 @@ Defect 是一个**无头**（headless）通用 agent，强调：
 | 会话持久化 | v0 即落盘，jsonl append-only，可 resume | 配 sqlite 等带索引存储为后续演进 |
 | 命名 | crate 目录裸名，package 名加 `defect-` 前缀 | 目录简洁，发布命名空间明确 |
 
+## 2.1 配置层级
+
+当前配置层级为：
+
+```text
+default < user < project < project-local < CLI
+```
+
+对应位置：
+
+- 用户配置：`$XDG_CONFIG_HOME/defect/config.toml` 或 `~/.config/defect/config.toml`
+- 项目共享配置：`<repo>/.defect/config.toml`
+- 项目本地覆盖：`<repo>/.defect/config.local.toml`
+
+共享项目配置面向仓库内容，带安全限制；本地项目覆盖面向机器本地使用，默认不进 git。
+
 ## 3. Crate 拆分
 
 ```

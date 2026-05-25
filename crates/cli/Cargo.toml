@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 defect-acp.workspace = true
 defect-agent.workspace = true
+defect-config.workspace = true
 defect-llm.workspace = true
 defect-tools.workspace = true
 tokio.workspace = true

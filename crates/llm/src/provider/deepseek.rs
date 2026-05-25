@@ -8,11 +8,12 @@
 //!   或显式 config 覆盖
 //! - **默认凭证 env**：`DEEPSEEK_API_KEY`（兼容写法 `OPENAI_API_KEY` 也认）
 //! - **vendor / display_name**：`info()` 报 `"deepseek"` / `"DeepSeek Chat"`
-//! - **capabilities.thinking**：`Supported`（DeepSeek `deepseek-reasoner`
-//!   原生发 `delta.reasoning_content`，协议层已经把它翻成 `ThinkingDelta`）
+//! - **capabilities.thinking**：`Supported`（DeepSeek v4 系列原生发
+//!   `delta.reasoning_content`，协议层已经把它翻成 `ThinkingDelta`）
 //!
-//! 模型表（`deepseek-chat` / `deepseek-reasoner` 的 context_window 等）已经
-//! 维护在 `provider/openai.rs` 的硬编码表里，无需在这里重复。
+//! 模型表（`deepseek-v4-flash` / `deepseek-v4-pro` 的 context_window /
+//! thinking_echo 等）维护在 `provider/openai.rs` 的硬编码表里，无需在
+//! 这里重复。
 
 use std::env;
 use std::sync::Arc;
@@ -105,9 +106,9 @@ impl DeepSeekProvider {
 
 /// DeepSeek provider 默认能力矩阵。
 ///
-/// 与 OpenAI 默认差在 `thinking`：DeepSeek `deepseek-reasoner` 原生流式发
-/// reasoning，协议层已支持 → 标 `Supported`。`vision` 标 `Unsupported`：
-/// 截至 2025 DeepSeek 公开 API 还没多模态输入；上层裁图前会查能力。
+/// 与 OpenAI 默认差在 `thinking`：DeepSeek v4 系列原生流式发 reasoning，
+/// 协议层已支持 → 标 `Supported`。`vision` 标 `Unsupported`：
+/// 截至 2026 DeepSeek 公开 API 还没多模态输入；上层裁图前会查能力。
 fn default_deepseek_capabilities() -> Capabilities {
     Capabilities {
         tool_calls: FeatureSupport::Supported,
@@ -115,8 +116,8 @@ fn default_deepseek_capabilities() -> Capabilities {
         thinking: FeatureSupport::Supported,
         vision: FeatureSupport::Unsupported,
         prompt_cache: FeatureSupport::Supported,
-        // DeepSeek 各模型行为不一致：R1 系列禁止回放 reasoning_content，
-        // v4-pro 必须回放。provider 默认走保守 Forbidden，模型级覆盖走
+        // DeepSeek v4 系列必须回放 reasoning_content。provider 默认走保守
+        // Forbidden（用于未识别的模型 id），模型级覆盖走
         // [`ModelCapabilityOverrides::thinking_echo`]（见 provider/openai.rs
         // 硬编码表）。
         thinking_echo: ThinkingEcho::Forbidden,

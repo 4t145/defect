@@ -1,0 +1,542 @@
+# 配置加载与合并
+
+`defect-config` 负责把用户配置、项目配置、环境变量与 CLI override 收敛成一份
+启动时可直接消费的强类型配置对象。本文先定义 **P1 最小可落地方案**，后续再演进
+ profile / managed config / 远程组织配置等能力。
+
+---
+
+## 1. 目标与远期目标
+
+### 1.1 目标
+
+P1 只解决四件事：
+
+1. **稳定的层级顺序**：用户 / 项目 / 本地项目 / CLI 覆盖有明确 precedence。
+2. **强类型输出**：CLI、agent、provider、tool、sandbox 都拿结构化配置，不直接读 env / TOML。
+3. **安全边界清晰**：项目配置可改“仓库内协作行为”，不可改“凭证去向 / 出站目标”。
+4. **可解释**：出问题时能回答“这个最终值来自哪一层”。
+
+### 1.2 远期目标
+
+以下能力**不是 P1 范围**，但属于明确的后续演进方向：
+
+- managed config / 企业强制策略
+- 远程组织配置
+- profile / 多套用户配置切换
+- runtime 热重载
+- 配置写回 API
+
+这些在 `code-reference` 里都存在先例；这里只是明确它们不进入 P1 首批落地范围，不代表后续不做。
+
+---
+
+## 2. 参考实现结论
+
+本设计主要参考了 `code-reference` 中三套实现：
+
+### 2.1 Codex
+
+`codex-rs` 的价值主要有三点：
+
+1. **配置按 layer stack 表达**，而不是“直接 merge 完就丢掉来源”。
+2. **项目层有 denylist / trust 边界**。项目配置不能改模型出口、通知、某些远程端点等。
+3. **CLI override 走 dotted-path patch layer**，而不是散落在各处手工覆盖。
+
+对我们最有价值的是第 2 点。`defect` 也是 agent，本地仓库里的配置不应能静默把流量导向任意 endpoint。
+
+### 2.2 OpenCode
+
+`opencode` 的价值主要有三点：
+
+1. **明确写出 precedence**，并强调“配置是 merge，不是 replace”。
+2. **按声明来源解析相对路径**，避免 merge 后 `./foo` 失去语义。
+3. **少数数组字段做特判**，不是一刀切“所有数组 append”。
+
+对我们最有价值的是第 1、3 点。`defect` 也应该把每个字段的 merge 规则写死，不能让实现时凭感觉。
+
+### 2.3 Claw Code
+
+`claw-code` 的价值主要有两点：
+
+1. **层次很简单**：user → project → local，便于落地和测试。
+2. **加载结果保留 loaded entries**，CLI 能做 `/config`、`doctor` 这类诊断。
+
+对我们最有价值的是“先做简单层次，再留演进口”，这和 `defect` 当前阶段最匹配。
+
+### 2.4 对 `defect` 的取舍
+
+最终取舍：
+
+- 借鉴 Codex 的 **layer stack + 项目层限制**
+- 借鉴 OpenCode 的 **merge 语义显式化 + 路径按来源解析**
+- 借鉴 Claw 的 **先做最小闭环**
+
+不照搬的部分：
+
+- 不做 Codex 那套 managed / trust / profile 全家桶
+- 不做 OpenCode 的远程 config / 目录型 config / JSONC
+- 不照搬 Claw 的 JSON 形态与兼容文件名；但保留它的 project-local override 思路
+
+---
+
+## 3. 配置源与优先级
+
+P1 只支持五类输入，按 **低到高** 的 precedence 排列：
+
+1. **内建默认值**
+2. **用户配置**：`$XDG_CONFIG_HOME/defect/config.toml`，否则 `~/.config/defect/config.toml`
+3. **项目配置**：从 `cwd` 向上找到仓库根；仅加载 `<repo>/.defect/config.toml`
+4. **本地项目覆盖**：`<repo>/.defect/config.local.toml`
+5. **CLI override**
+
+补充规则：
+
+- `.env` **不算配置层**。它只用于补 provider 凭证和少量兼容型 env。
+- `DEFECT_*` 这类产品层环境变量不单独作为配置层；它们通过 CLI 入口的 `clap` `env` 支持注入参数解析结果，再自然落入 CLI override 层。
+- 当前不做多级父目录 `.defect/config.toml` 链式叠加；只认 repo root 下的 `config.toml` 与 `config.local.toml`。
+
+这样做的原因：
+
+- 比 Codex 的 `cwd/tree/repo` 多层项目配置更简单，P1 足够。
+- 比当前散落在 `crates/cli/src/main.rs` 的 `--provider` / `DEFECT_PROVIDER` / `.env` 逻辑更统一。
+
+---
+
+## 4. 文件格式与路径
+
+### 4.1 格式
+
+P1 使用 **TOML**。
+
+原因：
+
+- Rust 生态成熟，类型映射直接。
+- workspace 里已经大量使用 TOML。
+- 与 Codex 的 Rust 实现一致，后续 dotted-path override 也容易做。
+
+### 4.2 路径
+
+用户配置：
+
+```text
+$XDG_CONFIG_HOME/defect/config.toml
+~/.config/defect/config.toml
+```
+
+项目配置：
+
+```text
+<repo>/.defect/config.toml
+<repo>/.defect/config.local.toml
+```
+
+规则：
+
+- 项目层以 git root 为准；若不在 git repo 内，则不加载项目配置。
+- `config.toml` 面向仓库共享；`config.local.toml` 面向机器本地覆盖，默认应加入 `.gitignore`。
+- 所有相对路径都相对于**声明它的配置文件所在目录**解析。
+
+---
+
+## 5. 配置对象分层
+
+`defect-config` 不直接把原始 TOML 暴露给调用方，而是输出两层结构：
+
+### 5.1 原始层
+
+```rust
+pub struct ConfigLayerEntry {
+    pub source: ConfigSource,
+    pub path: PathBuf,
+    pub raw_toml: Option<String>,
+    pub value: toml::Value,
+    pub disabled_reason: Option<String>,
+}
+```
+
+用途：
+
+- debug / doctor / 测试断言
+- 回答“这个值来自哪”
+- 后续支持严格模式 / ignored key warning
+
+### 5.2 有效配置层
+
+```rust
+pub struct EffectiveConfig {
+    pub cli: CliConfig,
+    pub turn: TurnConfigFile,
+    pub provider: ProviderConfigSet,
+    pub tools: ToolsConfig,
+    pub sandbox: SandboxConfigFile,
+    pub tracing: TracingConfigFile,
+}
+```
+
+其中：
+
+- `CliConfig`：CLI 自己消费，比如默认 provider、model、resume 路径等
+- `TurnConfigFile`：映射到 `defect-agent::session::TurnConfig`
+- `ProviderConfigSet`：各 provider 的显式配置
+- `ToolsConfig`：bash / fs / search 等工具默认行为
+- `SandboxConfigFile`：默认 sandbox / permission policy
+- `TracingConfigFile`：日志等级、结构化 tracing 相关项
+
+P1 不要求这些类型一次到位，但要求 schema 先按这个方向组织，避免后面再从大杂烩拆分。
+
+---
+
+## 6. 建议 schema
+
+P1 推荐的顶层 TOML 结构：
+
+```toml
+[default]
+provider = "echo"
+model = "echo"
+
+[turn]
+request_limit = 32
+max_llm_retries = 2
+compact_threshold_tokens = 120000
+
+[providers.anthropic]
+base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4-5"
+
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+organization = "org_xxx"
+project = "proj_xxx"
+
+[tools.bash]
+default_timeout_ms = 30000
+max_timeout_ms = 600000
+
+[tools.fs]
+read_default_limit = 2000
+read_max_limit = 20000
+
+[sandbox]
+mode = "ask-writes"
+
+[tracing]
+filter = "info,toac=warn"
+```
+
+说明：
+
+- `default.provider` / `default.model` 是全局默认选择。
+- `providers.<name>.model` 是该 provider 的默认模型；当当前 provider 命中时可作为回退值。
+- 凭证不进 TOML，仍走 env。
+
+凭证 env 规则：
+
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `DEEPSEEK_API_KEY`
+
+兼容 env 输入：
+
+- `DEFECT_PROVIDER`
+- `DEFECT_MODEL`
+
+这两个在实现上应被视为 **CLI 层等价覆盖**，具体做法是直接使用 `clap` 的 `env` 支持，而不是在 `defect-config` 或 provider 内部再各自手工读一遍。
+
+---
+
+## 7. Merge 规则
+
+这是实现时最重要的部分。P1 不允许“统一 deep merge 一把梭”。
+
+### 7.1 标量
+
+标量字段直接按高优先级覆盖低优先级：
+
+- `string`
+- `bool`
+- `integer`
+- `duration-like integer`
+
+例如：
+
+- `default.provider`
+- `default.model`
+- `sandbox.mode`
+- `tracing.filter`
+
+### 7.2 表对象
+
+表对象按 key 递归 merge。
+
+例如：
+
+- `[providers.openai]`
+- `[tools.bash]`
+
+低层有、上层没有的 key 保留；冲突 key 由高层覆盖。
+
+### 7.3 数组
+
+P1 默认规则：**数组整体替换，不做拼接**。
+
+原因：
+
+- 最容易解释。
+- 避免 OpenCode 那种“部分数组去重拼接、部分覆盖”的复杂度进入 P1。
+
+例外只在真正需要时单独开白名单。目前 P1 不预设数组拼接字段。
+
+### 7.4 dotted-path CLI override
+
+CLI override 统一先构造成一层 TOML，再按普通 merge 流程叠上去。
+
+例如：
+
+```text
+--config default.provider=\"anthropic\"
+--config providers.anthropic.model=\"claude-sonnet-4-5\"
+--config tools.bash.default_timeout_ms=10000
+```
+
+这样实现比在 `main.rs` 里一个字段一个字段手工覆盖更稳，也更接近 Codex 的做法。
+
+---
+
+## 8. 项目配置的安全边界
+
+这是 P1 必须有的。
+
+共享项目配置来自仓库内容，不应能静默改变以下内容：
+
+1. **出站目标**
+2. **认证相关**
+3. **全局观测出口**
+
+因此 **`config.toml`** 的 denylist 建议为：
+
+- `default.provider`
+- `providers.*.base_url`
+- `providers.*.organization`
+- `providers.*.project`
+- 任何 `api_key` / token 字段
+- `tracing.otlp.*`
+- 后续若引入 `notify` / webhook / hooks，也默认不允许项目层设置
+
+处理策略：
+
+- `config.toml` 里出现这些字段时，**忽略该字段并记录 warning**
+- 不让整个配置文件 hard fail
+
+为什么不是直接报错：
+
+- 对用户更温和，符合 Codex 的“项目层有 ignored keys warning”思路
+- 仓库内带模板配置时更好协作
+
+`config.local.toml` 的定位不同：
+
+- 它是机器本地文件，不面向仓库共享
+- 信任级别与用户配置接近，而不是与仓库内容接近
+
+因此 P1 里建议：
+
+- **denylist 只作用于共享项目层 `config.toml`**
+- **`config.local.toml` 不走这份项目层 denylist**
+
+这样既保住安全边界，也保住“本地项目覆盖是顺手能力”的价值。
+
+---
+
+## 9. 环境变量策略
+
+当前仓库里 provider 自己还在读 env。P1 后应统一成下面的规则：
+
+### 9.1 CLI 入口负责
+
+- 用 `clap` 的 `env` 支持读取 `DEFECT_PROVIDER`
+- 用 `clap` 的 `env` 支持读取 `DEFECT_MODEL`
+- 输出规范化后的 CLI 参数给 `defect-config`
+
+### 9.2 配置 crate负责
+
+- 读取 XDG / HOME
+- 读取配置文件
+- 合并“文件层 + CLI 解析结果”
+- 读取 `.env` 文件并注入进程环境的兼容逻辑
+
+### 9.3 provider crate负责
+
+- 只消费显式传入的 provider config
+- 凭证若未显式传入，可从标准 env 读
+
+### 9.4 统一优先级
+
+对 `provider` / `model`：
+
+```text
+CLI flag > DEFECT_* env > config file > built-in default
+```
+
+对凭证：
+
+```text
+provider-specific env only
+```
+
+解释：
+
+- `provider` 和 `model` 的 env 接入点归 CLI 参数解析层；配置系统只接收“已经解析好的 CLI override”
+- `API key` 是鉴权输入，归 provider
+
+---
+
+## 10. 读取流程
+
+推荐的加载流程：
+
+1. 解析 `cwd`
+2. 定位用户配置路径
+3. 定位 git repo root 与项目配置路径
+4. 读取 `<repo>/.defect/config.toml`
+5. 读取 `<repo>/.defect/config.local.toml`
+6. 逐层生成 `ConfigLayerEntry`
+7. 对共享项目层 `config.toml` 做 denylist sanitize
+8. 解析 CLI override 为一层虚拟 TOML
+9. merge 成 `merged_toml`
+10. 将 `merged_toml` 反序列化为强类型 `ConfigToml`
+11. 衍生 `EffectiveConfig`
+
+建议 API：
+
+```rust
+pub struct LoadConfigOptions {
+    pub cwd: PathBuf,
+    pub cli_overrides: Vec<(String, toml::Value)>,
+}
+
+pub struct LoadedConfig {
+    pub layers: ConfigLayerStack,
+    pub effective: EffectiveConfig,
+    pub warnings: Vec<ConfigWarning>,
+}
+
+pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>;
+```
+
+---
+
+## 11. 错误与 warning
+
+按 [`docs/internal/errors.md`](./errors.md) 的规则，`defect-config` 应提供：
+
+```rust
+#[non_exhaustive]
+pub enum ConfigError {
+    Io { path: PathBuf, source: BoxError },
+    Parse { path: PathBuf, source: BoxError },
+    Invalid { path: PathBuf, message: String },
+    Source(#[source] BoxError),
+}
+```
+
+同时单独定义 warning：
+
+```rust
+pub enum ConfigWarning {
+    IgnoredProjectKey { path: PathBuf, key: String, reason: &'static str },
+    UnknownKey { path: PathBuf, key: String },
+    DeprecatedKey { path: PathBuf, old: String, new: String },
+}
+```
+
+P1 建议：
+
+- 用户层 parse error：直接 fail
+- 项目层 parse error：直接 fail
+- 共享项目层 denylist 命中：warning，不 fail
+- 未知 key：P1 先 warning；等 strict mode 再升级为 error
+
+---
+
+## 12. 与当前代码的接线方式
+
+当前 `crates/cli/src/main.rs` 里有三块临时逻辑：
+
+1. `.env` 加载
+2. `--provider` / `--model`
+3. `build_provider()` 内各 provider 默认 model
+
+P1 落地后应变成：
+
+- `main.rs` 只解析原始 CLI 参数
+- `defect-config` 产出 `LoadedConfig`
+- `main.rs` 只做装配：
+  - 从 `LoadedConfig.effective` 取当前 provider
+  - 从 `LoadedConfig.effective` 取 turn config
+  - 从 `LoadedConfig.effective` 取 tool config
+  - 把 provider-specific config 传给 `defect-llm`
+
+也就是说：
+
+- `main.rs` 不再自己决定 precedence
+- `DEFECT_PROVIDER` / `DEFECT_MODEL` 继续由 `clap` 的 `env` 机制处理；`defect-config` 不重复解析它们
+- `defect-llm` 不再承担产品配置选择逻辑
+
+---
+
+## 13. 测试矩阵
+
+P1 至少覆盖这些测试：
+
+1. 用户配置单层加载成功
+2. 用户 + 项目 merge，项目覆盖同名标量
+3. 用户 + 项目 + 本地项目 merge，本地项目覆盖共享项目层
+4. 递归表对象保留非冲突 key
+5. CLI override 覆盖本地项目层
+6. `DEFECT_PROVIDER` / `DEFECT_MODEL` 等价于 CLI 上层覆盖
+7. 共享项目层设置 `providers.openai.base_url` 被忽略并产 warning
+8. `config.local.toml` 设置 `providers.openai.base_url` 生效
+9. 相对路径字段按声明文件目录解析
+10. 数组字段整体替换而非拼接
+11. 缺失配置文件不报错
+12. TOML 语法错误带 path
+
+如果要补一条 golden test，建议断言：
+
+- `LoadedConfig.layers`
+- `LoadedConfig.warnings`
+- `LoadedConfig.effective`
+
+三者一起稳定输出。
+
+---
+
+## 14. P1 实现顺序
+
+建议按下面顺序落：
+
+1. `docs/internal/config.md`
+2. `defect-config` 的原始 schema 与 `ConfigError`
+3. layer discovery + TOML parse
+4. merge + 共享项目层 denylist sanitize
+5. `EffectiveConfig` 映射
+6. `crates/cli/src/main.rs` 改为走 `defect-config`
+7. precedence / warning / path 解析测试
+
+---
+
+## 15. 最终决策
+
+P1 采用：
+
+- **TOML**
+- **default < user < project < project-local < CLI**
+- **`.env` 不算配置层**
+- **数组默认整体替换**
+- **共享项目层有 denylist，命中后 warning + 忽略**
+- **`config.local.toml` 作为机器本地覆盖层，默认高于共享项目层**
+- **保留 layer stack 和 warnings，方便 debug / doctor / 后续 session metadata**
+
+这是比当前实现更统一、比 Codex/OpenCode 更轻、又足够安全的一版。

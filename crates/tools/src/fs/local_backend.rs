@@ -173,10 +173,12 @@ async fn read_window_streaming(
 ) -> Result<String, FsError> {
     use tokio::io::AsyncBufReadExt;
 
-    let file = tokio::fs::File::open(path).await.map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FsError::NotFound(path.to_path_buf()),
-        _ => FsError::Backend(BoxError::new(e)),
-    })?;
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| match e.kind() {
+            io::ErrorKind::NotFound => FsError::NotFound(path.to_path_buf()),
+            _ => FsError::Backend(BoxError::new(e)),
+        })?;
     let mut reader = tokio::io::BufReader::new(file);
 
     let start = line.unwrap_or(1).max(1) as usize - 1;

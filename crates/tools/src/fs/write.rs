@@ -108,11 +108,7 @@ impl Tool for WriteFileTool {
                 // v1: 在 describe 阶段轻量读旧内容，给授权 UI 画 old↔new 精确 diff。
                 // 失败时降级为"全新"diff（old=None）——`describe` 不该因 IO 抖动
                 // 阻塞 ToolCall 推送。NotFound 等价于"创建新文件"路径，老内容就是 None。
-                let old = ctx
-                    .fs
-                    .read_text(PathBuf::from(path), None, None)
-                    .await
-                    .ok();
+                let old = ctx.fs.read_text(PathBuf::from(path), None, None).await.ok();
 
                 fields.content = Some(vec![ToolCallContent::Diff(
                     Diff::new(PathBuf::from(path), content).old_text(old),
