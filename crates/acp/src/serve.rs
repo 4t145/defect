@@ -14,22 +14,134 @@ use agent_client_protocol::schema::{
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Stdio};
 use defect_agent::event::{AgentEvent, PermissionResolution};
-use defect_agent::session::{AgentCore, Session, TurnError};
+use defect_agent::llm::ProviderError;
+use defect_agent::session::{AgentCore, AgentError, Session, TurnError};
 use futures::StreamExt;
+use serde_json::json;
 
 use crate::project::{project, PermissionAsk, Projection};
 
 /// `defect-acp` 公共错误类型。
+///
+/// 划线规则：每个 variant 对应一种 wire 上能稳定区分的错误形态——
+/// session 是否存在、会话创建是否成功、turn 是否跑完。下游 LLM /
+/// 工具失败由 [`TurnError`] 自己分类承载（这一层不再细拆）。
+///
+/// 投影规则见 [`AcpError::into_wire_error`]：variant → JSON-RPC ErrorCode +
+/// 结构化 `data` 字段。诊断字段（`session_id` / `request_id` 等）走 `data`，
+/// 不糊在 `message` 里。
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AcpError {
+    /// JSON-RPC / stdio 传输层失败。仅 [`serve_on`] 的顶层 `?` 用得上；
+    /// handler 内部任何地方都不会构造这个 variant。
     #[error("acp transport error: {0}")]
     Transport(agent_client_protocol::Error),
+
+    /// `session/prompt` / `session/cancel` 引用的 session 在 agent 侧不存在。
+    #[error("session not found: {session_id}")]
+    SessionNotFound { session_id: String },
+
+    /// `session/new` 创建 session 失败（cwd 不存在 / MCP 启动失败等）。
+    #[error("create_session failed: {0}")]
+    CreateSession(#[source] AgentError),
+
+    /// `session/prompt` 跑 turn 时失败（重试用尽的 provider 错误 / 主循环
+    /// invariant 被破坏）。
+    #[error("turn failed: {0}")]
+    Turn(#[source] TurnError),
+
+    /// turn task 在返回 stop reason 之前被 drop（理应不可达，留作安全网）。
+    #[error("turn task dropped before completion")]
+    TurnDropped,
+
+    /// 客户端请求 `authenticate`，但 v0 不支持。
+    #[error("authentication not supported")]
+    AuthNotSupported,
 }
 
 impl From<agent_client_protocol::Error> for AcpError {
     fn from(err: agent_client_protocol::Error) -> Self {
         AcpError::Transport(err)
     }
+}
+
+impl AcpError {
+    /// 投影成 ACP wire `Error`：选 ErrorCode + 在 `data` 里挂结构化诊断字段。
+    ///
+    /// 调用方（handler）在 [`agent_client_protocol::Responder::respond_with_error`]
+    /// 处用它替代手搓的 [`agent_client_protocol::util::internal_error`] +
+    /// `format!`，让客户端能稳定 match `code` / 读 `data.kind` 而非解析字符串。
+    pub fn into_wire_error(self) -> agent_client_protocol::Error {
+        use agent_client_protocol::Error as Wire;
+        match self {
+            AcpError::Transport(err) => err,
+
+            AcpError::SessionNotFound { session_id } => {
+                // 用 ResourceNotFound 而不是 InternalError——这是"客户端引用了
+                // 不存在的资源"，是客户端可恢复的 4xx 类语义。
+                Wire::resource_not_found(Some(session_id))
+            }
+
+            AcpError::CreateSession(err) => {
+                Wire::internal_error().data(json!({
+                    "kind": "create_session_failed",
+                    "message": err.to_string(),
+                }))
+            }
+
+            AcpError::Turn(err) => Wire::internal_error().data(turn_error_data(&err)),
+
+            AcpError::TurnDropped => Wire::internal_error().data(json!({
+                "kind": "turn_task_dropped",
+                "message": "turn task dropped before completion",
+            })),
+
+            // method_not_found 比 internal_error 更对位"未实现的方法"
+            AcpError::AuthNotSupported => Wire::method_not_found().data(json!({
+                "kind": "auth_not_supported",
+                "message": "authentication not supported",
+            })),
+        }
+    }
+}
+
+/// 把 [`TurnError`] 拍成 wire `data` 字段。区分两个 sub-kind：
+/// - `provider` —— 重试用尽后仍失败的 provider 错误，附 `retry_hint` /
+///   `request_id`，让客户端能据此提示用户"换模型 / 等一会再试"
+/// - `internal` —— 主循环 invariant 被破坏，纯诊断用
+fn turn_error_data(err: &TurnError) -> serde_json::Value {
+    match err {
+        TurnError::TurnInProgress => json!({
+            "kind": "turn_in_progress",
+            "message": err.to_string(),
+        }),
+        TurnError::Provider(provider_err) => provider_error_data(provider_err),
+        TurnError::Internal(_) => json!({
+            "kind": "internal",
+            "message": err.to_string(),
+        }),
+        // TurnError 是 #[non_exhaustive]：未来新 variant 落到这里走 internal
+        // 兜底，不阻塞编译；新增分类时优先把它提到上面写专门 arm。
+        _ => json!({
+            "kind": "internal",
+            "message": err.to_string(),
+        }),
+    }
+}
+
+fn provider_error_data(err: &ProviderError) -> serde_json::Value {
+    let mut data = json!({
+        "kind": "provider",
+        "message": err.to_string(),
+        "retryable": err.is_retryable(),
+    });
+    if let Some(req_id) = &err.request_id
+        && let Some(map) = data.as_object_mut()
+    {
+        map.insert("request_id".into(), json!(req_id));
+    }
+    data
 }
 
 /// 启动 stdio ACP 服务，阻塞到对端断开。
@@ -68,9 +180,7 @@ where
         .on_receive_request(
             async move |_req: AuthenticateRequest, responder, _cx| {
                 // v0 不开 auth；任何客户端发起的 auth 请求都按未实现拒绝。
-                responder.respond_with_error(agent_client_protocol::util::internal_error(
-                    "authentication not supported",
-                ))
+                responder.respond_with_error(AcpError::AuthNotSupported.into_wire_error())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -83,11 +193,8 @@ where
                         Ok(session) => {
                             responder.respond(NewSessionResponse::new(session.id().clone()))
                         }
-                        Err(err) => responder.respond_with_error(
-                            agent_client_protocol::util::internal_error(format!(
-                                "create_session failed: {err}"
-                            )),
-                        ),
+                        Err(err) => responder
+                            .respond_with_error(AcpError::CreateSession(err).into_wire_error()),
                     }
                 }
             },
@@ -101,10 +208,10 @@ where
                     let session_id = req.session_id.clone();
                     let Some(session) = agent.session(&session_id) else {
                         return responder.respond_with_error(
-                            agent_client_protocol::util::internal_error(format!(
-                                "session not found: {}",
-                                session_id.0
-                            )),
+                            AcpError::SessionNotFound {
+                                session_id: session_id.0.to_string(),
+                            }
+                            .into_wire_error(),
                         );
                     };
                     // 把 turn 的执行扔到 spawn 任务里，handler 立即返回，
@@ -185,16 +292,12 @@ async fn run_prompt_turn(
                         stop_reason.get_or_insert(reason);
                     }
                     Ok(Err(err)) => {
-                        return responder.respond_with_error(
-                            agent_client_protocol::util::internal_error(format!("turn failed: {err}")),
-                        );
+                        return responder
+                            .respond_with_error(AcpError::Turn(err).into_wire_error());
                     }
                     Err(_) => {
-                        return responder.respond_with_error(
-                            agent_client_protocol::util::internal_error(
-                                "turn task dropped before completion",
-                            ),
-                        );
+                        return responder
+                            .respond_with_error(AcpError::TurnDropped.into_wire_error());
                     }
                 }
                 // turn 已结束，drain 剩余事件，确保 ToolCallFinished 等都上 wire。
@@ -217,9 +320,8 @@ async fn run_prompt_turn(
         None => match (&mut turn_rx).await {
             Ok(Ok(r)) => r,
             Ok(Err(err)) => {
-                return responder.respond_with_error(
-                    agent_client_protocol::util::internal_error(format!("turn failed: {err}")),
-                );
+                return responder
+                    .respond_with_error(AcpError::Turn(err).into_wire_error());
             }
             Err(_) => AcpStopReason::Cancelled,
         },
