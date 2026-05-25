@@ -39,6 +39,9 @@ pub enum AgentEvent {
     /// 一次 prompt turn 开始。
     TurnStarted,
 
+    /// 用户 prompt 已被主循环提交到 history。
+    UserPromptCommitted { content: Vec<ContentBlock> },
+
     /// 一次 prompt turn 结束。`reason` 直接借 ACP 的语义类别。
     TurnEnded {
         reason: AcpStopReason,
@@ -58,6 +61,7 @@ pub enum AgentEvent {
     /// 映射到 ACP `SessionUpdate::ToolCall`（status = Pending）。
     ToolCallStarted {
         id: ToolCallId,
+        name: String,
         fields: ToolCallUpdateFields,
     },
 

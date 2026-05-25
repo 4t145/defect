@@ -32,6 +32,7 @@ use defect_config::{
 use defect_llm::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 use defect_llm::provider::openai::{OpenAiConfig, OpenAiProvider};
+use defect_storage::StorageObserver;
 use defect_tools::{BashTool, EditFileTool, ReadFileTool, WriteFileTool};
 use tracing_subscriber::EnvFilter;
 
@@ -73,10 +74,13 @@ async fn main() -> anyhow::Result<()> {
             .insert(Arc::new(EditFileTool::new()))
             .build(),
     );
+    let storage = Arc::new(StorageObserver::new(default_sessions_root()?));
     let agent = DefaultAgentCore::builder()
         .provider(provider)
         .process_tools(tools)
         .policy(build_policy(config.effective.sandbox.mode))
+        .observe_session(storage.clone())
+        .session_loader(storage)
         .config(turn_config)
         .build();
     let agent: Arc<dyn AgentCore> = Arc::new(agent);
@@ -170,6 +174,18 @@ fn build_policy(mode: SandboxMode) -> Arc<dyn SandboxPolicy> {
         SandboxMode::Open => Arc::new(OpenPolicy),
         SandboxMode::DenyAll => Arc::new(DenyAllPolicy),
     }
+}
+
+fn default_sessions_root() -> anyhow::Result<std::path::PathBuf> {
+    if let Ok(xdg_state_home) = env::var("XDG_STATE_HOME") {
+        return Ok(std::path::PathBuf::from(xdg_state_home).join("defect/sessions"));
+    }
+    if let Ok(home) = env::var("HOME") {
+        return Ok(std::path::PathBuf::from(home).join(".local/state/defect/sessions"));
+    }
+    Err(anyhow::anyhow!(
+        "cannot resolve session storage root: neither XDG_STATE_HOME nor HOME is set"
+    ))
 }
 
 impl From<ProviderKind> for ConfigProviderKind {

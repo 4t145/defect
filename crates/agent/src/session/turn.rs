@@ -120,6 +120,11 @@ pub struct TurnRunner<'a> {
 impl<'a> TurnRunner<'a> {
     /// 跑完一次 turn。
     pub async fn run(&self, prompt: Vec<ContentBlock>) -> Result<AcpStopReason, TurnError> {
+        self.events
+            .emit(AgentEvent::UserPromptCommitted {
+                content: prompt.clone(),
+            })
+            .await;
         self.history.append(Message {
             role: Role::User,
             content: prompt
@@ -459,6 +464,7 @@ impl<'a> TurnRunner<'a> {
             self.events
                 .emit(AgentEvent::ToolCallStarted {
                     id: id.clone(),
+                    name: tu.name.clone(),
                     fields: with_status(description.fields.clone(), ToolCallStatus::Pending),
                 })
                 .await;
@@ -552,6 +558,7 @@ impl<'a> TurnRunner<'a> {
         self.events
             .emit(AgentEvent::ToolCallStarted {
                 id: id.clone(),
+                name: String::new(),
                 fields: fields.clone(),
             })
             .await;

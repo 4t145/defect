@@ -77,8 +77,49 @@ pub trait AgentCore: Send + Sync {
         fs: Arc<dyn FsBackend>,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
 
+    /// 从持久化状态恢复一个已存在的 session。
+    ///
+    /// # Errors
+    ///
+    /// session 不存在、持久化数据损坏、恢复出的 cwd 不可用等。
+    fn load_session(
+        &self,
+        id: SessionId,
+        fs: Arc<dyn FsBackend>,
+    ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
+
     /// 按 id 查找已存在的 session。
     fn session(&self, id: &SessionId) -> Option<Arc<dyn Session>>;
+}
+
+/// 从持久化存储恢复 session 的抽象。
+///
+/// 具体实现通常来自 `defect-storage`。
+pub trait SessionLoader: Send + Sync {
+    /// 按 session id 读回恢复所需状态。
+    ///
+    /// # Errors
+    ///
+    /// session 不存在、存储损坏、或回放失败。
+    fn load_session(&self, id: SessionId) -> BoxFuture<'_, Result<LoadedSession, BoxError>>;
+}
+
+/// `AgentCore::create_session` 成功后的观察器。
+///
+/// 典型用途：
+/// - 启动 `defect-storage` 的事件订阅落盘
+/// - 挂 tracing / metrics 的 per-session 旁路消费者
+pub trait SessionObserver: Send + Sync {
+    /// 在 session 创建成功后调用。
+    ///
+    /// # Errors
+    ///
+    /// 初始化旁路消费者失败时返回错误，阻止该 session 对外可见。
+    fn on_session_created(
+        &self,
+        session: Arc<dyn Session>,
+        info: SessionCreateInfo,
+    ) -> Result<(), BoxError>;
 }
 
 /// 单次会话。
@@ -119,6 +160,21 @@ pub trait Session: Send + Sync {
 
 /// 事件流。类型擦除以支持 trait 对象返回。
 pub type EventStream = futures::stream::BoxStream<'static, AgentEvent>;
+
+/// 创建成功后给 [`SessionObserver`] 的稳定信息。
+#[derive(Debug, Clone)]
+pub struct SessionCreateInfo {
+    pub id: SessionId,
+    pub cwd: PathBuf,
+    pub mcp_servers: Vec<McpServer>,
+}
+
+/// 从持久化存储恢复出来的最小 session 数据。
+#[derive(Debug, Clone)]
+pub struct LoadedSession {
+    pub info: SessionCreateInfo,
+    pub history: Vec<Message>,
+}
 
 /// 消息历史的抽象。
 ///
@@ -166,6 +222,15 @@ pub enum AgentError {
     /// 单调递增 + 时间戳的 id 生成器理论上不会冲突；这是安全网。
     #[error("session id already in use: {0}")]
     DuplicateSessionId(SessionId),
+
+    #[error("session observer failed: {0}")]
+    Observer(#[source] BoxError),
+
+    #[error("session not found in storage: {0}")]
+    SessionNotFound(SessionId),
+
+    #[error("session restore failed: {0}")]
+    Restore(#[source] BoxError),
 
     #[error(transparent)]
     Other(#[from] BoxError),

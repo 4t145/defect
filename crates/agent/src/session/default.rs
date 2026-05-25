@@ -43,7 +43,8 @@ use crate::session::permissions::PermissionGate;
 use crate::session::tool_registry::{CompositeRegistry, StaticToolRegistry};
 use crate::session::turn::{TurnConfig, TurnRunner};
 use crate::session::{
-    AgentCore, AgentError, EventStream, History, Session, ToolRegistry, TurnError, VecHistory,
+    AgentCore, AgentError, EventStream, History, Session, SessionCreateInfo, SessionLoader,
+    SessionObserver, ToolRegistry, TurnError, VecHistory,
 };
 
 /// 默认 [`AgentCore`]。
@@ -52,6 +53,8 @@ pub struct DefaultAgentCore {
     process_tools: Arc<dyn ToolRegistry>,
     policy: Arc<dyn SandboxPolicy>,
     config: TurnConfig,
+    loader: Option<Arc<dyn SessionLoader>>,
+    observers: Vec<Arc<dyn SessionObserver>>,
     sessions: DashMap<SessionId, Arc<dyn Session>>,
 }
 
@@ -66,6 +69,8 @@ pub struct DefaultAgentCoreBuilder {
     provider: Option<Arc<dyn LlmProvider>>,
     process_tools: Option<Arc<dyn ToolRegistry>>,
     policy: Option<Arc<dyn SandboxPolicy>>,
+    loader: Option<Arc<dyn SessionLoader>>,
+    observers: Vec<Arc<dyn SessionObserver>>,
     config: TurnConfig,
 }
 
@@ -85,6 +90,16 @@ impl DefaultAgentCoreBuilder {
         self
     }
 
+    pub fn session_loader(mut self, loader: Arc<dyn SessionLoader>) -> Self {
+        self.loader = Some(loader);
+        self
+    }
+
+    pub fn observe_session(mut self, observer: Arc<dyn SessionObserver>) -> Self {
+        self.observers.push(observer);
+        self
+    }
+
     pub fn config(mut self, config: TurnConfig) -> Self {
         self.config = config;
         self
@@ -101,6 +116,8 @@ impl DefaultAgentCoreBuilder {
             policy: self
                 .policy
                 .unwrap_or_else(|| Arc::new(AskWritesPolicy::new()) as Arc<dyn SandboxPolicy>),
+            loader: self.loader,
+            observers: self.observers,
             config: self.config,
             sessions: DashMap::new(),
         }
@@ -119,6 +136,7 @@ impl AgentCore for DefaultAgentCore {
             if !cwd.is_absolute() || !cwd.exists() {
                 return Err(AgentError::InvalidCwd(cwd));
             }
+            let session_cwd = cwd.clone();
             // v0 不实际拉起 MCP server——defect-mcp 接入后这里会变成
             // "为每个 server 起 client、把它的工具注册成 per-session"。
             if !mcp_servers.is_empty() {
@@ -143,6 +161,58 @@ impl AgentCore for DefaultAgentCore {
                 cwd,
                 history: Box::new(VecHistory::new()) as Box<dyn History>,
                 tools: composite,
+                provider: self.provider.clone(),
+                policy: self.policy.clone(),
+                events: Arc::new(EventEmitter::new()),
+                permissions: Arc::new(PermissionGate::new()),
+                turn_state: Mutex::new(TurnSlot::default()),
+                config: self.config.clone(),
+                fs,
+            }) as Arc<dyn Session>;
+
+            let session_info = SessionCreateInfo {
+                id: id.clone(),
+                cwd: session_cwd,
+                mcp_servers,
+            };
+            for observer in &self.observers {
+                observer
+                    .on_session_created(session.clone(), session_info.clone())
+                    .map_err(AgentError::Observer)?;
+            }
+
+            self.sessions.insert(id, session.clone());
+            Ok(session)
+        })
+    }
+
+    fn load_session(
+        &self,
+        id: SessionId,
+        fs: Arc<dyn FsBackend>,
+    ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>> {
+        Box::pin(async move {
+            if let Some(existing) = self.sessions.get(&id) {
+                return Ok(existing.value().clone());
+            }
+            let Some(loader) = &self.loader else {
+                return Err(AgentError::Restore(crate::error::BoxError::new(
+                    std::io::Error::other("session loader not configured"),
+                )));
+            };
+            let loaded = loader
+                .load_session(id.clone())
+                .await
+                .map_err(AgentError::Restore)?;
+
+            let session = Arc::new(DefaultSession {
+                id: loaded.info.id.clone(),
+                cwd: loaded.info.cwd.clone(),
+                history: Box::new(VecHistory::from_messages(loaded.history)),
+                tools: Arc::new(CompositeRegistry::new(
+                    Arc::new(StaticToolRegistry::empty()),
+                    self.process_tools.clone(),
+                )),
                 provider: self.provider.clone(),
                 policy: self.policy.clone(),
                 events: Arc::new(EventEmitter::new()),
@@ -179,6 +249,8 @@ pub struct DefaultSession {
     /// `TurnRunner` 把 `&dyn FsBackend` 借到 [`crate::tool::ToolContext`] 传给工具。
     fs: Arc<dyn FsBackend>,
 }
+
+impl DefaultSession {}
 
 #[derive(Default)]
 struct TurnSlot {

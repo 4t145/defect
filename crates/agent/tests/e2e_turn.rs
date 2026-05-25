@@ -23,7 +23,8 @@ use defect_agent::llm::{
 };
 use defect_agent::policy::{AskWritesPolicy, OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
-    AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
+    AgentCore, DefaultAgentCore, LoadedSession, Session, SessionCreateInfo, SessionLoader,
+    StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
 };
 use defect_agent::tool::{
     SafetyClass, Tool, ToolCallDescription, ToolContext, ToolEvent, ToolSchema, ToolStream,
@@ -139,6 +140,20 @@ struct EchoTool {
     schema: ToolSchema,
 }
 
+struct StubLoader {
+    loaded: LoadedSession,
+}
+
+impl SessionLoader for StubLoader {
+    fn load_session(
+        &self,
+        _id: SessionId,
+    ) -> BoxFuture<'_, Result<LoadedSession, defect_agent::error::BoxError>> {
+        let loaded = self.loaded.clone();
+        Box::pin(async move { Ok(loaded) })
+    }
+}
+
 impl EchoTool {
     fn new() -> Self {
         Self {
@@ -234,12 +249,14 @@ async fn full_turn_with_one_tool_call() {
     assert!(matches!(stop, StopReason::EndTurn));
 
     // 收 emit 事件直到 TurnEnded
+    let mut got_user_prompt_committed = false;
     let mut got_text = false;
     let mut got_tool_call_started = false;
     let mut got_tool_call_finished = false;
     let mut got_turn_ended = false;
     while let Some(ev) = events.next().await {
         match ev {
+            AgentEvent::UserPromptCommitted { .. } => got_user_prompt_committed = true,
             AgentEvent::AssistantText { .. } => got_text = true,
             AgentEvent::ToolCallStarted { .. } => got_tool_call_started = true,
             AgentEvent::ToolCallFinished { .. } => got_tool_call_finished = true,
@@ -251,6 +268,7 @@ async fn full_turn_with_one_tool_call() {
         }
     }
 
+    assert!(got_user_prompt_committed, "should see UserPromptCommitted");
     assert!(got_text, "should see at least one AssistantText");
     assert!(got_tool_call_started, "should see ToolCallStarted");
     assert!(got_tool_call_finished, "should see ToolCallFinished");
@@ -337,6 +355,50 @@ async fn second_run_turn_while_first_in_flight_returns_in_progress() {
         r1,
         Ok(StopReason::Cancelled) | Ok(StopReason::EndTurn)
     ));
+}
+
+#[tokio::test]
+async fn load_session_restores_history_for_next_turn() {
+    let provider = Arc::new(ScriptedProvider::new()) as Arc<dyn LlmProvider>;
+    let loaded = LoadedSession {
+        info: SessionCreateInfo {
+            id: SessionId::new(uuid_like()),
+            cwd: std::env::current_dir().expect("cwd"),
+            mcp_servers: Vec::new(),
+        },
+        history: vec![defect_agent::llm::Message {
+            role: defect_agent::llm::Role::User,
+            content: vec![defect_agent::llm::MessageContent::Text {
+                text: "restored".to_string(),
+            }],
+        }],
+    };
+
+    let core = DefaultAgentCore::builder()
+        .provider(provider)
+        .session_loader(Arc::new(StubLoader {
+            loaded: loaded.clone(),
+        }))
+        .config(TurnConfig {
+            model: "scripted-001".to_string(),
+            ..TurnConfig::default()
+        })
+        .build();
+
+    let session = core
+        .load_session(
+            loaded.info.id.clone(),
+            Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+        )
+        .await
+        .expect("load session");
+
+    let stop = session
+        .run_turn(vec![ContentBlock::Text(TextContent::new("hello"))])
+        .await
+        .expect("turn");
+
+    assert!(matches!(stop, StopReason::EndTurn));
 }
 
 /// 用 `AskWritesPolicy`（默认）+ Mutating 工具走 Ask 路径。

@@ -49,7 +49,7 @@ pub(crate) fn project(session_id: &SessionId, event: AgentEvent) -> Projection {
             SessionUpdate::AgentThoughtChunk(ContentChunk::new(content)),
         )),
 
-        AgentEvent::ToolCallStarted { id, fields } => {
+        AgentEvent::ToolCallStarted { id, fields, .. } => {
             let tool_call = tool_call_from_fields(id, fields);
             Projection::Update(notification(session_id, SessionUpdate::ToolCall(tool_call)))
         }
