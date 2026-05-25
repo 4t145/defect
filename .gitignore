@@ -1,4 +1,5 @@
 /target
+.worktrees/
 
 # 本地 secret / 凭证：不要进 git
 .env
