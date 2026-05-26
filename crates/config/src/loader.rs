@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use defect_agent::error::BoxError;
 use defect_agent::llm::SamplingParams;
-use defect_agent::session::{TurnConfig, TurnRequestLimit};
+use defect_agent::session::{BasePromptConfig, PromptConfig, TurnConfig, TurnRequestLimit};
 use toml::Value as TomlValue;
 
 use crate::mcp::{is_known_mcp_key, is_known_mcp_prefix, resolve_mcp_config};
@@ -12,14 +12,14 @@ use crate::overrides::{
     build_cli_layer, merge_toml_values, remove_toml_path, remove_toml_table_key,
 };
 use crate::types::{
-    AnthropicConfigFile, BashToolConfig, CliConfig, ConfigError, ConfigLayerEntry,
-    ConfigLayerStack, ConfigSource, ConfigToml, ConfigWarning, DEFAULT_ANTHROPIC_MODEL,
-    DEFAULT_BASH_MAX_TIMEOUT_MS, DEFAULT_BASH_TIMEOUT_MS, DEFAULT_DEEPSEEK_MODEL,
-    DEFAULT_ECHO_MODEL, DEFAULT_FS_READ_LIMIT, DEFAULT_FS_READ_MAX_LIMIT, DEFAULT_OPENAI_MODEL,
-    DeepSeekConfigFile, EffectiveConfig, FsToolConfig, LoadConfigOptions, LoadedConfig,
-    OpenAiConfigFile, OtlpTracingConfig, PROJECT_CONFIG_RELATIVE, PROJECT_LOCAL_CONFIG_RELATIVE,
-    ProviderConfigs, ProviderKind, SandboxConfig, SandboxMode, ToolsConfig, TracingConfig,
-    USER_CONFIG_RELATIVE,
+    AnthropicConfigFile, BasePromptConfigFile, BashToolConfig, CliConfig, ConfigError,
+    ConfigLayerEntry, ConfigLayerStack, ConfigSource, ConfigToml, ConfigWarning,
+    DEFAULT_ANTHROPIC_MODEL, DEFAULT_BASH_MAX_TIMEOUT_MS, DEFAULT_BASH_TIMEOUT_MS,
+    DEFAULT_DEEPSEEK_MODEL, DEFAULT_ECHO_MODEL, DEFAULT_FS_READ_LIMIT, DEFAULT_FS_READ_MAX_LIMIT,
+    DEFAULT_OPENAI_MODEL, DeepSeekConfigFile, EffectiveConfig, FsToolConfig, LoadConfigOptions,
+    LoadedConfig, OpenAiConfigFile, OtlpTracingConfig, PROJECT_CONFIG_RELATIVE,
+    PROJECT_LOCAL_CONFIG_RELATIVE, PromptConfigFile, ProviderConfigs, ProviderKind, SandboxConfig,
+    SandboxMode, ToolsConfig, TracingConfig, USER_CONFIG_RELATIVE,
 };
 
 /// 加载并合并 `defect` 的有效配置。
@@ -53,10 +53,14 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
     });
 
     let mut merged = defaults;
+    let mut base_prompt: Option<BasePromptConfigFile> = None;
 
     if let Some((user_layer, layer_warnings)) = load_optional_layer(ConfigSource::User, user_path)?
     {
         warnings.extend(layer_warnings);
+        if let Some(candidate) = extract_base_prompt(&user_layer.value, user_layer.path.as_ref()) {
+            base_prompt = Some(candidate);
+        }
         merge_toml_values(&mut merged, &user_layer.value);
         layers.push(user_layer);
     }
@@ -65,6 +69,11 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
         load_optional_layer_opt(ConfigSource::Project, project_path)?
     {
         warnings.extend(layer_warnings);
+        if let Some(candidate) =
+            extract_base_prompt(&project_layer.value, project_layer.path.as_ref())
+        {
+            base_prompt = Some(candidate);
+        }
         let (value, layer_warnings) =
             sanitize_shared_project_layer(project_layer.path.as_ref(), &project_layer.value);
         warnings.extend(layer_warnings);
@@ -79,11 +88,20 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
         load_optional_layer_opt(ConfigSource::ProjectLocal, project_local_path)?
     {
         warnings.extend(layer_warnings);
+        if let Some(candidate) = extract_base_prompt(
+            &project_local_layer.value,
+            project_local_layer.path.as_ref(),
+        ) {
+            base_prompt = Some(candidate);
+        }
         merge_toml_values(&mut merged, &project_local_layer.value);
         layers.push(project_local_layer);
     }
 
     if let Some(cli_layer) = build_cli_layer(&opts.cli)? {
+        if let Some(candidate) = extract_base_prompt(&cli_layer.value, cli_layer.path.as_ref()) {
+            base_prompt = Some(candidate);
+        }
         merge_toml_values(&mut merged, &cli_layer.value);
         layers.push(cli_layer);
     }
@@ -95,7 +113,11 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
             path: PathBuf::from("<merged>"),
             message: err.to_string(),
         })?;
-    let effective = build_effective_config(Path::new("<merged>"), parsed)?;
+    let effective = build_effective_config(
+        Path::new("<merged>"),
+        parsed,
+        base_prompt.unwrap_or_default(),
+    )?;
 
     Ok(LoadedConfig {
         layers: ConfigLayerStack { layers },
@@ -132,7 +154,15 @@ pub fn load_dotenv_compat(cwd: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveConfig, ConfigError> {
+fn build_effective_config(
+    path: &Path,
+    config: ConfigToml,
+    base_prompt: BasePromptConfigFile,
+) -> Result<EffectiveConfig, ConfigError> {
+    // `base_prompt` 的最终选择在 `load_config()` 中完成，这里只保留 typed decode
+    // 对 schema 的约束，并显式消费字段避免它与 raw-layer 解析脱节。
+    let _ = config.base_prompt.file.as_deref();
+    let _ = config.base_prompt.text.as_deref();
     let provider = config.default.provider.unwrap_or_default();
     let provider_model = match provider {
         ProviderKind::Echo => Some(DEFAULT_ECHO_MODEL.to_string()),
@@ -140,20 +170,38 @@ fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveCo
             .providers
             .anthropic
             .as_ref()
-            .and_then(|cfg| cfg.model.clone())
+            .and_then(|cfg| cfg.default_model.clone())
             .or_else(|| Some(DEFAULT_ANTHROPIC_MODEL.to_string())),
         ProviderKind::Openai => config
             .providers
             .openai
             .as_ref()
-            .and_then(|cfg| cfg.model.clone())
+            .and_then(|cfg| cfg.default_model.clone())
             .or_else(|| Some(DEFAULT_OPENAI_MODEL.to_string())),
         ProviderKind::Deepseek => config
             .providers
             .deepseek
             .as_ref()
-            .and_then(|cfg| cfg.model.clone())
+            .and_then(|cfg| cfg.default_model.clone())
             .or_else(|| Some(DEFAULT_DEEPSEEK_MODEL.to_string())),
+    };
+    let allowed_models = match provider {
+        ProviderKind::Echo => None,
+        ProviderKind::Anthropic => config
+            .providers
+            .anthropic
+            .as_ref()
+            .and_then(|cfg| cfg.models.clone()),
+        ProviderKind::Openai => config
+            .providers
+            .openai
+            .as_ref()
+            .and_then(|cfg| cfg.models.clone()),
+        ProviderKind::Deepseek => config
+            .providers
+            .deepseek
+            .as_ref()
+            .and_then(|cfg| cfg.models.clone()),
     };
     let model = config
         .default
@@ -161,13 +209,35 @@ fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveCo
         .or(provider_model)
         .unwrap_or_else(|| DEFAULT_ECHO_MODEL.to_string());
 
+    let prompt = PromptConfigFile {
+        file: config.prompt.file.unwrap_or_else(|| "AGENTS.md".to_owned()),
+        text: config.prompt.text,
+        provider_overlays: config
+            .prompt
+            .providers
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(provider, overlay)| overlay.text.map(|text| (provider, text)))
+            .collect(),
+        model_overlays: config.prompt.models.unwrap_or_default(),
+    };
+
     let mut turn = TurnConfig {
         model: model.clone(),
+        allowed_models,
+        base_prompt: BasePromptConfig {
+            file: base_prompt.file.clone(),
+            text: base_prompt.text.clone(),
+        },
+        prompt: PromptConfig {
+            file: prompt.file.clone(),
+            text: prompt.text.clone(),
+            provider_overlays: prompt.provider_overlays.clone(),
+            model_overlays: prompt.model_overlays.clone(),
+        },
         ..TurnConfig::default()
     };
-    if let Some(system_prompt) = config.turn.system_prompt {
-        turn.system_prompt = Some(system_prompt);
-    }
+    turn.system_prompt = config.turn.system_prompt;
     if let Some(request_limit) = config.turn.request_limit {
         turn.request_limit = TurnRequestLimit::Adaptive {
             initial: request_limit,
@@ -190,13 +260,16 @@ fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveCo
     Ok(EffectiveConfig {
         cli: CliConfig { provider, model },
         turn,
+        base_prompt,
+        prompt,
         providers: ProviderConfigs {
             anthropic: config
                 .providers
                 .anthropic
                 .map(|cfg| AnthropicConfigFile {
                     base_url: cfg.base_url,
-                    model: cfg.model,
+                    default_model: cfg.default_model,
+                    models: cfg.models,
                 })
                 .unwrap_or_default(),
             openai: config
@@ -204,7 +277,8 @@ fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveCo
                 .openai
                 .map(|cfg| OpenAiConfigFile {
                     base_url: cfg.base_url,
-                    model: cfg.model,
+                    default_model: cfg.default_model,
+                    models: cfg.models,
                     organization: cfg.organization,
                     project: cfg.project,
                 })
@@ -214,7 +288,8 @@ fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveCo
                 .deepseek
                 .map(|cfg| DeepSeekConfigFile {
                     base_url: cfg.base_url,
-                    model: cfg.model,
+                    default_model: cfg.default_model,
+                    models: cfg.models,
                 })
                 .unwrap_or_default(),
         },
@@ -414,21 +489,30 @@ fn strip_quotes(s: &str) -> &str {
 fn is_known_config_key(key: &str) -> bool {
     matches!(
         key,
-        "default.provider"
+        "base_prompt.file"
+            | "base_prompt.text"
+            | "default.provider"
             | "default.model"
+            | "prompt.file"
+            | "prompt.text"
+            | "prompt.providers"
+            | "prompt.models"
             | "turn.system_prompt"
             | "turn.request_limit"
             | "turn.compact_threshold_tokens"
             | "turn.max_llm_retries"
             | "turn.max_concurrent_tools"
             | "providers.anthropic.base_url"
-            | "providers.anthropic.model"
+            | "providers.anthropic.default_model"
+            | "providers.anthropic.models"
             | "providers.openai.base_url"
-            | "providers.openai.model"
+            | "providers.openai.default_model"
+            | "providers.openai.models"
             | "providers.openai.organization"
             | "providers.openai.project"
             | "providers.deepseek.base_url"
-            | "providers.deepseek.model"
+            | "providers.deepseek.default_model"
+            | "providers.deepseek.models"
             | "tools.bash.default_timeout_ms"
             | "tools.bash.max_timeout_ms"
             | "tools.fs.read_default_limit"
@@ -444,6 +528,8 @@ fn is_known_config_prefix(key: &str) -> bool {
     matches!(
         key,
         "default"
+            | "base_prompt"
+            | "prompt"
             | "turn"
             | "providers"
             | "providers.anthropic"
@@ -491,6 +577,32 @@ fn find_repo_root(cwd: &Path) -> Option<PathBuf> {
 
 fn canonicalize_or_original(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn extract_base_prompt(
+    config: &TomlValue,
+    source_path: Option<&PathBuf>,
+) -> Option<BasePromptConfigFile> {
+    let base = config.get("base_prompt")?.as_table()?;
+    let file = base
+        .get("file")
+        .and_then(TomlValue::as_str)
+        .map(PathBuf::from);
+    let text = base
+        .get("text")
+        .and_then(TomlValue::as_str)
+        .map(str::to_owned);
+    if file.is_none() && text.is_none() {
+        None
+    } else {
+        let file = file.map(|path| match source_path {
+            Some(path_root) if path.is_relative() => {
+                path_root.parent().unwrap_or(path_root).join(path)
+            }
+            _ => path,
+        });
+        Some(BasePromptConfigFile { file, text })
+    }
 }
 
 #[cfg(test)]

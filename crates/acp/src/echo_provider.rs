@@ -49,11 +49,11 @@ impl LlmProvider for EchoProvider {
     }
 
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(vec![echo_model_info()]) })
     }
 
-    fn model_info(&self, _model_id: &str) -> Option<ModelInfo> {
-        None
+    fn model_info(&self, model_id: &str) -> Option<ModelInfo> {
+        (model_id == "echo").then(echo_model_info)
     }
 
     fn complete(
@@ -81,6 +81,17 @@ impl LlmProvider for EchoProvider {
             > = Box::pin(stream::iter(chunks));
             Ok(s)
         })
+    }
+}
+
+fn echo_model_info() -> ModelInfo {
+    ModelInfo {
+        id: "echo".to_string(),
+        display_name: Some("Echo".to_string()),
+        context_window: None,
+        max_output_tokens: None,
+        deprecated: false,
+        capabilities_overrides: Default::default(),
     }
 }
 

@@ -9,6 +9,7 @@
 //! - [`EventEmitter`]：事件发布（`Arc` 共享，使工具 task 也能 emit）
 //! - [`PermissionGate`]：权限请求等待
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,6 +35,8 @@ use crate::session::events::EventEmitter;
 use crate::session::permissions::PermissionGate;
 use crate::session::{History, ToolRegistry, TurnError};
 use crate::tool::{Tool, ToolContext, ToolError, ToolEvent};
+
+const DEFAULT_PROMPT_FILE: &str = "AGENTS.md";
 
 /// LLM 调用次数上限策略。详见 `docs/internal/turn-loop.md` §6.1。
 #[derive(Debug, Clone, Copy)]
@@ -74,7 +77,10 @@ impl TurnRequestLimit {
 #[derive(Debug, Clone)]
 pub struct TurnConfig {
     pub model: String,
+    pub allowed_models: Option<Vec<String>>,
+    pub base_prompt: BasePromptConfig,
     pub system_prompt: Option<String>,
+    pub prompt: PromptConfig,
     pub sampling: SamplingParams,
     pub request_limit: TurnRequestLimit,
     pub compact_threshold_tokens: Option<u64>,
@@ -87,7 +93,10 @@ impl Default for TurnConfig {
     fn default() -> Self {
         Self {
             model: String::new(),
+            allowed_models: None,
+            base_prompt: BasePromptConfig::default(),
             system_prompt: None,
+            prompt: PromptConfig::default(),
             sampling: SamplingParams::default(),
             request_limit: TurnRequestLimit::Adaptive {
                 initial: 32,
@@ -96,6 +105,31 @@ impl Default for TurnConfig {
             compact_threshold_tokens: None,
             max_llm_retries: 3,
             max_concurrent_tools: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BasePromptConfig {
+    pub file: Option<PathBuf>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptConfig {
+    pub file: String,
+    pub text: Option<String>,
+    pub provider_overlays: std::collections::BTreeMap<String, String>,
+    pub model_overlays: std::collections::BTreeMap<String, String>,
+}
+
+impl Default for PromptConfig {
+    fn default() -> Self {
+        Self {
+            file: DEFAULT_PROMPT_FILE.to_owned(),
+            text: None,
+            provider_overlays: std::collections::BTreeMap::new(),
+            model_overlays: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -113,6 +147,7 @@ pub struct TurnRunner<'a> {
     pub permissions: &'a PermissionGate,
     pub cancel: CancellationToken,
     pub config: &'a TurnConfig,
+    pub system_prompt: Option<String>,
     pub cwd: &'a std::path::Path,
     pub fs: Arc<dyn FsBackend>,
 }
@@ -209,7 +244,7 @@ impl<'a> TurnRunner<'a> {
     fn build_request(&self) -> CompletionRequest {
         CompletionRequest {
             model: self.config.model.clone(),
-            system: self.config.system_prompt.clone(),
+            system: self.system_prompt.clone(),
             messages: self.history.snapshot(),
             tools: self.tools.schemas(),
             tool_choice: ToolChoice::Auto,

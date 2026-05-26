@@ -89,6 +89,120 @@ model = "local-model"
 }
 
 #[test]
+fn provider_models_and_default_model_flow_into_effective_config() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "openai"
+
+[providers.openai]
+default_model = "gpt-4.1-mini"
+models = ["gpt-4.1-mini", "gpt-4.1", "o4-mini"]
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(loaded.effective.cli.provider, ProviderKind::Openai);
+    assert_eq!(loaded.effective.cli.model, "gpt-4.1-mini");
+    assert_eq!(loaded.effective.turn.model, "gpt-4.1-mini");
+    assert_eq!(
+        loaded.effective.turn.allowed_models.as_deref(),
+        Some(
+            [
+                "gpt-4.1-mini".to_string(),
+                "gpt-4.1".to_string(),
+                "o4-mini".to_string(),
+            ]
+            .as_slice(),
+        )
+    );
+    assert_eq!(
+        loaded.effective.providers.openai.default_model.as_deref(),
+        Some("gpt-4.1-mini")
+    );
+    assert_eq!(
+        loaded.effective.providers.openai.models.as_deref(),
+        Some(
+            [
+                "gpt-4.1-mini".to_string(),
+                "gpt-4.1".to_string(),
+                "o4-mini".to_string(),
+            ]
+            .as_slice(),
+        )
+    );
+}
+
+#[test]
+fn base_prompt_uses_highest_precedence_layer_and_resolves_relative_file() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[base_prompt]
+text = "user base"
+"#,
+    );
+    write(
+        &repo.join(".defect/config.toml"),
+        r#"
+[base_prompt]
+file = "prompts/project.md"
+"#,
+    );
+    write(&repo.join(".defect/prompts/project.md"), "project base");
+    write(
+        &repo.join(PROJECT_LOCAL_CONFIG_RELATIVE),
+        r#"
+[base_prompt]
+text = "local base"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(
+        loaded.effective.base_prompt.text.as_deref(),
+        Some("local base")
+    );
+    assert_eq!(loaded.effective.base_prompt.file, None);
+    assert_eq!(
+        loaded.effective.turn.base_prompt.text.as_deref(),
+        Some("local base")
+    );
+    assert_eq!(loaded.effective.turn.base_prompt.file, None);
+}
+
+#[test]
+fn base_prompt_preserves_declaring_file_base_path() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &repo.join(".defect/config.toml"),
+        r#"
+[base_prompt]
+file = "prompts/base.md"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(
+        loaded.effective.base_prompt.file.as_deref(),
+        Some(repo.join(".defect/prompts/base.md").as_path())
+    );
+}
+
+#[test]
 fn shared_project_layer_denylist_warns_and_ignores() {
     let tmp = TempDir::new().expect("tmp");
     let repo = tmp.path().join("repo");

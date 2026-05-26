@@ -9,14 +9,16 @@ use std::sync::{Arc, RwLock};
 
 use agent_client_protocol::schema::{
     AgentCapabilities, AuthenticateRequest, CancelNotification, ClientCapabilities,
-    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, SessionId, StopReason as AcpStopReason,
+    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse, ModelId,
+    ModelInfo as AcpModelInfo, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, SessionId,
+    SessionModelState, SetSessionModelRequest, SetSessionModelResponse,
+    StopReason as AcpStopReason,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Stdio};
 use defect_agent::event::{AgentEvent, PermissionResolution};
 use defect_agent::fs::FsBackend;
-use defect_agent::llm::ProviderError;
+use defect_agent::llm::{ModelInfo, ProviderError, ProviderInfo};
 use defect_agent::session::{AgentCore, AgentError, Session, TurnError, uuid_like};
 use defect_tools::LocalFsBackend;
 use futures::StreamExt;
@@ -74,6 +76,9 @@ pub enum AcpError {
     #[error("load_session failed: {0}")]
     LoadSession(#[source] AgentError),
 
+    #[error("set_model failed: {0}")]
+    SetModel(#[source] ProviderError),
+
     /// `session/prompt` 跑 turn 时失败（重试用尽的 provider 错误 / 主循环
     /// invariant 被破坏）。
     #[error("turn failed: {0}")]
@@ -127,6 +132,16 @@ impl AcpError {
                     "kind": "load_session_failed",
                     "message": err.to_string(),
                 }))
+            }
+
+            AcpError::SetModel(err) => {
+                let code = match err.kind {
+                    defect_agent::llm::ProviderErrorKind::ModelNotFound { .. } => {
+                        ErrorCode::InvalidParams
+                    }
+                    _ => ErrorCode::InternalError,
+                };
+                Wire::new(code.into(), err.to_string()).data(provider_error_data(&err))
             }
 
             AcpError::Turn(err) => {
@@ -200,6 +215,84 @@ fn provider_error_data(err: &ProviderError) -> serde_json::Value {
     data
 }
 
+async fn session_model_state(session: &dyn Session) -> Option<SessionModelState> {
+    let current_model = session.current_model().to_string();
+    let provider = session.provider_info();
+    let available_models = match session.list_models().await {
+        Ok(models) => models,
+        Err(err) => {
+            tracing::warn!(
+                provider = %provider.vendor,
+                model = %current_model,
+                error = %err,
+                "failed to load ACP session model candidates; falling back to current model only"
+            );
+            Vec::new()
+        }
+    };
+
+    Some(SessionModelState::new(
+        ModelId::new(current_model.clone()),
+        acp_model_candidates(provider, &current_model, available_models),
+    ))
+}
+
+fn acp_model_candidates(
+    provider: ProviderInfo,
+    current_model: &str,
+    available_models: Vec<ModelInfo>,
+) -> Vec<AcpModelInfo> {
+    let mut candidates = available_models
+        .into_iter()
+        .map(|model| acp_model_info(&provider, model))
+        .collect::<Vec<_>>();
+
+    let has_current_model = candidates
+        .iter()
+        .any(|candidate| candidate.model_id.0.as_ref() == current_model);
+    if !has_current_model {
+        candidates.insert(
+            0,
+            AcpModelInfo::new(current_model.to_string(), current_model.to_string())
+                .description(Some(provider_model_description(&provider, None, false))),
+        );
+    }
+
+    candidates
+}
+
+fn acp_model_info(provider: &ProviderInfo, model: ModelInfo) -> AcpModelInfo {
+    let name = model
+        .display_name
+        .clone()
+        .unwrap_or_else(|| model.id.clone());
+    AcpModelInfo::new(model.id.clone(), name).description(Some(provider_model_description(
+        provider,
+        Some(&model),
+        model.deprecated,
+    )))
+}
+
+fn provider_model_description(
+    provider: &ProviderInfo,
+    model: Option<&ModelInfo>,
+    deprecated: bool,
+) -> String {
+    let mut parts = vec![format!("provider: {}", provider.display_name)];
+    if let Some(model) = model {
+        if let Some(context_window) = model.context_window {
+            parts.push(format!("context_window={context_window}"));
+        }
+        if let Some(max_output_tokens) = model.max_output_tokens {
+            parts.push(format!("max_output_tokens={max_output_tokens}"));
+        }
+    }
+    if deprecated {
+        parts.push("deprecated".to_string());
+    }
+    parts.join(", ")
+}
+
 /// 启动 stdio ACP 服务，阻塞到对端断开。
 ///
 /// `agent` 由 `defect-cli` 装配（含 provider / 工具 / 配置）后注入。
@@ -217,6 +310,7 @@ where
     let agent_init = agent.clone();
     let agent_session_new = agent.clone();
     let agent_session_load = agent.clone();
+    let agent_set_model = agent.clone();
     let agent_prompt = agent.clone();
     let agent_cancel = agent.clone();
 
@@ -281,12 +375,15 @@ where
                         .await
                     {
                         Ok(session) => {
+                            let models = session_model_state(session.as_ref()).await;
                             tracing::info!(
                                 session_id = %short_session_id(session.id()),
                                 cwd = %cwd_for_log.display(),
                                 "session created"
                             );
-                            responder.respond(NewSessionResponse::new(session.id().clone()))
+                            responder.respond(
+                                NewSessionResponse::new(session.id().clone()).models(models),
+                            )
                         }
                         Err(err) => {
                             let acp_err = AcpError::CreateSession(err);
@@ -317,12 +414,13 @@ where
                     };
                     match agent.load_session(session_id.clone(), fs).await {
                         Ok(session) => {
+                            let models = session_model_state(session.as_ref()).await;
                             tracing::info!(
                                 session_id = %short_session_id(session.id()),
                                 cwd = %cwd_for_log.display(),
                                 "session loaded"
                             );
-                            responder.respond(LoadSessionResponse::new())
+                            responder.respond(LoadSessionResponse::new().models(models))
                         }
                         Err(err) => {
                             let acp_err = match err {
@@ -332,6 +430,37 @@ where
                                 other => AcpError::LoadSession(other),
                             };
                             tracing::warn!(error = %acp_err, "load_session failed");
+                            responder.respond_with_error(acp_err.into_wire_error())
+                        }
+                    }
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = agent_set_model.clone();
+                async move |req: SetSessionModelRequest, responder, _cx| {
+                    let agent = agent.clone();
+                    let session_id = req.session_id.clone();
+                    let Some(session) = agent.session(&session_id) else {
+                        return responder.respond_with_error(
+                            AcpError::SessionNotFound {
+                                session_id: session_id.0.to_string(),
+                            }
+                            .into_wire_error(),
+                        );
+                    };
+
+                    match session.set_model(req.model_id.0.to_string()).await {
+                        Ok(()) => responder.respond(SetSessionModelResponse::new()),
+                        Err(err) => {
+                            let acp_err = AcpError::SetModel(err);
+                            tracing::warn!(
+                                session_id = %short_session_id(session.id()),
+                                error = %acp_err,
+                                "session/set_model failed"
+                            );
                             responder.respond_with_error(acp_err.into_wire_error())
                         }
                     }

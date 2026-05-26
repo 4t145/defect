@@ -132,6 +132,8 @@ pub struct LoadedConfig {
 pub struct EffectiveConfig {
     pub cli: CliConfig,
     pub turn: TurnConfig,
+    pub base_prompt: BasePromptConfigFile,
+    pub prompt: PromptConfigFile,
     pub providers: ProviderConfigs,
     pub tools: ToolsConfig,
     pub sandbox: SandboxConfig,
@@ -143,6 +145,20 @@ pub struct EffectiveConfig {
 pub struct CliConfig {
     pub provider: ProviderKind,
     pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BasePromptConfigFile {
+    pub file: Option<PathBuf>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PromptConfigFile {
+    pub file: String,
+    pub text: Option<String>,
+    pub provider_overlays: BTreeMap<String, String>,
+    pub model_overlays: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -225,13 +241,15 @@ impl SandboxMode {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AnthropicConfigFile {
     pub base_url: Option<String>,
-    pub model: Option<String>,
+    pub default_model: Option<String>,
+    pub models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct OpenAiConfigFile {
     pub base_url: Option<String>,
-    pub model: Option<String>,
+    pub default_model: Option<String>,
+    pub models: Option<Vec<String>>,
     pub organization: Option<String>,
     pub project: Option<String>,
 }
@@ -239,7 +257,8 @@ pub struct OpenAiConfigFile {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DeepSeekConfigFile {
     pub base_url: Option<String>,
-    pub model: Option<String>,
+    pub default_model: Option<String>,
+    pub models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -292,6 +311,10 @@ pub(crate) struct ConfigToml {
     #[serde(default)]
     pub(crate) default: DefaultSection,
     #[serde(default)]
+    pub(crate) base_prompt: BasePromptSection,
+    #[serde(default)]
+    pub(crate) prompt: PromptSection,
+    #[serde(default)]
     pub(crate) turn: TurnSection,
     #[serde(default)]
     pub(crate) providers: ProvidersSection,
@@ -312,12 +335,31 @@ pub(crate) struct DefaultSection {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct BasePromptSection {
+    pub(crate) file: Option<String>,
+    pub(crate) text: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct TurnSection {
     pub(crate) system_prompt: Option<String>,
     pub(crate) request_limit: Option<u32>,
     pub(crate) compact_threshold_tokens: Option<u64>,
     pub(crate) max_llm_retries: Option<u32>,
     pub(crate) max_concurrent_tools: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct PromptSection {
+    pub(crate) file: Option<String>,
+    pub(crate) text: Option<String>,
+    pub(crate) providers: Option<BTreeMap<String, PromptOverlaySection>>,
+    pub(crate) models: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct PromptOverlaySection {
+    pub(crate) text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -330,13 +372,15 @@ pub(crate) struct ProvidersSection {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct AnthropicProviderSection {
     pub(crate) base_url: Option<String>,
-    pub(crate) model: Option<String>,
+    pub(crate) default_model: Option<String>,
+    pub(crate) models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct OpenAiProviderSection {
     pub(crate) base_url: Option<String>,
-    pub(crate) model: Option<String>,
+    pub(crate) default_model: Option<String>,
+    pub(crate) models: Option<Vec<String>>,
     pub(crate) organization: Option<String>,
     pub(crate) project: Option<String>,
 }
@@ -344,7 +388,8 @@ pub(crate) struct OpenAiProviderSection {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct DeepSeekProviderSection {
     pub(crate) base_url: Option<String>,
-    pub(crate) model: Option<String>,
+    pub(crate) default_model: Option<String>,
+    pub(crate) models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

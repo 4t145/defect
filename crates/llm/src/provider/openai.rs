@@ -37,8 +37,8 @@ const BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 const ORG_ENV: &str = "OPENAI_ORG";
 const PROJECT_ENV: &str = "OPENAI_PROJECT";
 
-type Http = client_util::client::HyperHttpsClient<toac::body::Body>;
-type Client = ApiClient<Http>;
+pub(crate) type Http = client_util::client::HyperHttpsClient<toac::body::Body>;
+pub(crate) type Client = ApiClient<Http>;
 
 /// OpenAI provider 配置。
 ///
@@ -144,6 +144,10 @@ impl OpenAiProvider {
             project,
             models: Arc::default(),
         })
+    }
+
+    pub(crate) fn client(&self) -> Client {
+        self.client.clone()
     }
 }
 
@@ -442,7 +446,7 @@ impl WithRequestIdOpt for ProviderError {
 
 // ---------- error mapping -----------------------------------------------
 
-fn call_error_to_provider<E>(err: CallError<E>) -> ProviderError
+pub(crate) fn call_error_to_provider<E>(err: CallError<E>) -> ProviderError
 where
     E: std::error::Error + Send + Sync + 'static,
 {

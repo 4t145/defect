@@ -10,19 +10,187 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use agent_client_protocol::schema::{
-    ContentBlock, InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    ContentBlock, InitializeRequest, LoadSessionRequest, ModelId, NewSessionRequest, PromptRequest,
     ProtocolVersion, SessionNotification, SessionUpdate, StopReason as AcpStopReason, TextContent,
 };
 use agent_client_protocol::{Agent, Channel, Client, ConnectTo, Role};
 use defect_acp::{EchoProvider, serve_on};
+use defect_agent::llm::{
+    Capabilities, CompletionRequest, FeatureSupport, LlmProvider, ModelInfo, ProtocolId,
+    ProviderChunk, ProviderError, ProviderErrorKind, ProviderInfo, ProviderStream,
+    StopReason as LlmStopReason, ThinkingEcho,
+};
 use defect_agent::session::{AgentCore, DefaultAgentCore, TurnConfig};
 use defect_storage::StorageObserver;
+use futures::future::BoxFuture;
+use futures::stream;
+use tokio_util::sync::CancellationToken;
 
 /// `Channel` 实现的是 `ConnectTo<R>` for 任意 R，但 `serve_on` 需要
 /// `T: ConnectTo<Agent>`。这里的 wrapper 仅是显式声明 role，方便类型推导。
 struct ChannelTransport<R: Role> {
     inner: Channel,
     _marker: std::marker::PhantomData<R>,
+}
+
+struct SwitchableProvider;
+
+impl LlmProvider for SwitchableProvider {
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            vendor: "switchable".to_string(),
+            protocol: ProtocolId::AnthropicMessages,
+            display_name: "Switchable Test Provider".to_string(),
+        }
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            tool_calls: FeatureSupport::Unsupported,
+            parallel_tool_calls: FeatureSupport::Unsupported,
+            thinking: FeatureSupport::Unsupported,
+            vision: FeatureSupport::Unsupported,
+            prompt_cache: FeatureSupport::Unsupported,
+            thinking_echo: ThinkingEcho::Forbidden,
+        }
+    }
+
+    fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
+        Box::pin(async {
+            Ok(vec![
+                ModelInfo {
+                    id: "alpha".to_string(),
+                    display_name: Some("Alpha".to_string()),
+                    context_window: None,
+                    max_output_tokens: None,
+                    deprecated: false,
+                    capabilities_overrides: Default::default(),
+                },
+                ModelInfo {
+                    id: "beta".to_string(),
+                    display_name: Some("Beta".to_string()),
+                    context_window: None,
+                    max_output_tokens: None,
+                    deprecated: false,
+                    capabilities_overrides: Default::default(),
+                },
+            ])
+        })
+    }
+
+    fn model_info(&self, model_id: &str) -> Option<ModelInfo> {
+        match model_id {
+            "alpha" => Some(ModelInfo {
+                id: "alpha".to_string(),
+                display_name: Some("Alpha".to_string()),
+                context_window: None,
+                max_output_tokens: None,
+                deprecated: false,
+                capabilities_overrides: Default::default(),
+            }),
+            "beta" => Some(ModelInfo {
+                id: "beta".to_string(),
+                display_name: Some("Beta".to_string()),
+                context_window: None,
+                max_output_tokens: None,
+                deprecated: false,
+                capabilities_overrides: Default::default(),
+            }),
+            _ => None,
+        }
+    }
+
+    fn complete(
+        &self,
+        req: CompletionRequest,
+        _cancel: CancellationToken,
+    ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
+        let model = req.model.clone();
+        Box::pin(async move {
+            let chunks: Vec<Result<ProviderChunk, ProviderError>> = vec![
+                Ok(ProviderChunk::MessageStart {
+                    id: "switchable-0".to_string(),
+                    model: model.clone(),
+                }),
+                Ok(ProviderChunk::TextDelta {
+                    text: format!("model={model}"),
+                }),
+                Ok(ProviderChunk::Stop {
+                    reason: LlmStopReason::EndTurn,
+                }),
+            ];
+            let s: ProviderStream = Box::pin(stream::iter(chunks));
+            Ok(s)
+        })
+    }
+}
+
+struct FlakyModelProvider;
+
+impl LlmProvider for FlakyModelProvider {
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            vendor: "flaky".to_string(),
+            protocol: ProtocolId::AnthropicMessages,
+            display_name: "Flaky Model Provider".to_string(),
+        }
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            tool_calls: FeatureSupport::Unsupported,
+            parallel_tool_calls: FeatureSupport::Unsupported,
+            thinking: FeatureSupport::Unsupported,
+            vision: FeatureSupport::Unsupported,
+            prompt_cache: FeatureSupport::Unsupported,
+            thinking_echo: ThinkingEcho::Forbidden,
+        }
+    }
+
+    fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
+        Box::pin(async {
+            Err(ProviderError::new(ProviderErrorKind::Other(
+                defect_agent::error::BoxError::new(std::io::Error::other(
+                    "models endpoint unavailable",
+                )),
+            )))
+        })
+    }
+
+    fn model_info(&self, model_id: &str) -> Option<ModelInfo> {
+        Some(ModelInfo {
+            id: model_id.to_string(),
+            display_name: Some(model_id.to_string()),
+            context_window: None,
+            max_output_tokens: None,
+            deprecated: false,
+            capabilities_overrides: Default::default(),
+        })
+    }
+
+    fn complete(
+        &self,
+        req: CompletionRequest,
+        _cancel: CancellationToken,
+    ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
+        let model = req.model.clone();
+        Box::pin(async move {
+            let chunks: Vec<Result<ProviderChunk, ProviderError>> = vec![
+                Ok(ProviderChunk::MessageStart {
+                    id: "flaky-0".to_string(),
+                    model: model.clone(),
+                }),
+                Ok(ProviderChunk::TextDelta {
+                    text: format!("model={model}"),
+                }),
+                Ok(ProviderChunk::Stop {
+                    reason: LlmStopReason::EndTurn,
+                }),
+            ];
+            let s: ProviderStream = Box::pin(stream::iter(chunks));
+            Ok(s)
+        })
+    }
 }
 
 impl<R: Role> ChannelTransport<R> {
@@ -103,6 +271,12 @@ async fn echo_round_trip() {
                     .send_request(NewSessionRequest::new(cwd))
                     .block_task()
                     .await?;
+                let models = new_session
+                    .models
+                    .expect("agent should advertise session model candidates");
+                assert_eq!(models.current_model_id.0.as_ref(), "echo");
+                assert_eq!(models.available_models.len(), 1);
+                assert_eq!(models.available_models[0].model_id.0.as_ref(), "echo");
 
                 let prompt_resp = cx
                     .send_request(PromptRequest::new(
@@ -194,6 +368,10 @@ async fn load_session_round_trip() {
                     .send_request(NewSessionRequest::new(cwd.clone()))
                     .block_task()
                     .await?;
+                let new_models = new_session
+                    .models
+                    .expect("new session should include model candidates");
+                assert_eq!(new_models.current_model_id.0.as_ref(), "echo");
 
                 let first = cx
                     .send_request(PromptRequest::new(
@@ -211,7 +389,9 @@ async fn load_session_round_trip() {
                     cwd.clone(),
                 ))
                 .block_task()
-                .await?;
+                .await?
+                .models
+                .expect("loaded session should include model candidates");
 
                 let second = cx
                     .send_request(PromptRequest::new(
@@ -230,6 +410,192 @@ async fn load_session_round_trip() {
         .expect("client connection completed");
 
     assert_eq!(client_result, AcpStopReason::EndTurn);
+
+    server_handle.abort();
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
+async fn set_model_updates_next_turn_model() {
+    let provider = Arc::new(SwitchableProvider);
+    let config = TurnConfig {
+        model: "alpha".to_string(),
+        allowed_models: Some(vec!["alpha".to_string(), "beta".to_string()]),
+        ..TurnConfig::default()
+    };
+    let agent_core = DefaultAgentCore::builder()
+        .provider(provider)
+        .config(config)
+        .build();
+    let agent_core: Arc<dyn AgentCore> = Arc::new(agent_core);
+
+    let (channel_a, channel_b) = Channel::duplex();
+    let server_handle = tokio::spawn(serve_on(
+        agent_core,
+        ChannelTransport::<Agent>::new(channel_b),
+    ));
+
+    let cwd = std::env::current_dir().expect("cwd available");
+    let client_result = Client
+        .builder()
+        .name("set-model-client")
+        .connect_with(
+            ChannelTransport::<Client>::new(channel_a),
+            async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await?;
+
+                let new_session = cx
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await?;
+                let models = new_session
+                    .models
+                    .expect("agent should advertise session model candidates");
+                assert_eq!(models.current_model_id.0.as_ref(), "alpha");
+                assert_eq!(models.available_models.len(), 2);
+
+                cx.send_request(agent_client_protocol::schema::SetSessionModelRequest::new(
+                    new_session.session_id.clone(),
+                    ModelId::new("beta"),
+                ))
+                .block_task()
+                .await?;
+
+                let prompt_resp = cx
+                    .send_request(PromptRequest::new(
+                        new_session.session_id,
+                        vec![ContentBlock::Text(TextContent::new("switch".to_string()))],
+                    ))
+                    .block_task()
+                    .await?;
+
+                Ok(prompt_resp.stop_reason)
+            },
+        )
+        .await
+        .expect("client connection completed");
+
+    assert_eq!(client_result, AcpStopReason::EndTurn);
+
+    server_handle.abort();
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
+async fn set_model_rejects_model_outside_configured_candidates() {
+    let provider = Arc::new(SwitchableProvider);
+    let config = TurnConfig {
+        model: "alpha".to_string(),
+        allowed_models: Some(vec!["alpha".to_string()]),
+        ..TurnConfig::default()
+    };
+    let agent_core = DefaultAgentCore::builder()
+        .provider(provider)
+        .config(config)
+        .build();
+    let agent_core: Arc<dyn AgentCore> = Arc::new(agent_core);
+
+    let (channel_a, channel_b) = Channel::duplex();
+    let server_handle = tokio::spawn(serve_on(
+        agent_core,
+        ChannelTransport::<Agent>::new(channel_b),
+    ));
+
+    let cwd = std::env::current_dir().expect("cwd available");
+    let client_result = Client
+        .builder()
+        .name("set-model-reject-client")
+        .connect_with(
+            ChannelTransport::<Client>::new(channel_a),
+            async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await?;
+
+                let new_session = cx
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await?;
+                let models = new_session
+                    .models
+                    .expect("agent should advertise session model candidates");
+                assert_eq!(models.available_models.len(), 1);
+                assert_eq!(models.available_models[0].model_id.0.as_ref(), "alpha");
+
+                let err = cx
+                    .send_request(agent_client_protocol::schema::SetSessionModelRequest::new(
+                        new_session.session_id,
+                        ModelId::new("beta"),
+                    ))
+                    .block_task()
+                    .await
+                    .expect_err("beta should be rejected by configured candidate filter");
+
+                Ok(err.message)
+            },
+        )
+        .await
+        .expect("client connection completed");
+
+    assert!(
+        client_result.contains("model not found") && client_result.contains("beta"),
+        "expected set_model rejection for filtered model, got {client_result:?}"
+    );
+
+    server_handle.abort();
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
+async fn model_candidates_fall_back_to_configured_whitelist_when_provider_list_fails() {
+    let provider = Arc::new(FlakyModelProvider);
+    let config = TurnConfig {
+        model: "deepseek-v4-pro".to_string(),
+        allowed_models: Some(vec![
+            "deepseek-v4-pro".to_string(),
+            "deepseek-v4-flash".to_string(),
+        ]),
+        ..TurnConfig::default()
+    };
+    let agent_core = DefaultAgentCore::builder()
+        .provider(provider)
+        .config(config)
+        .build();
+    let agent_core: Arc<dyn AgentCore> = Arc::new(agent_core);
+
+    let (channel_a, channel_b) = Channel::duplex();
+    let server_handle = tokio::spawn(serve_on(
+        agent_core,
+        ChannelTransport::<Agent>::new(channel_b),
+    ));
+
+    let cwd = std::env::current_dir().expect("cwd available");
+    let client_result = Client
+        .builder()
+        .name("flaky-model-client")
+        .connect_with(
+            ChannelTransport::<Client>::new(channel_a),
+            async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await?;
+
+                let loaded = cx
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await?;
+                let models = loaded
+                    .models
+                    .expect("session should still advertise configured models");
+                Ok(models.available_models.len() as u64)
+            },
+        )
+        .await
+        .expect("client connection completed");
+
+    assert_eq!(client_result, 2);
 
     server_handle.abort();
     let _ = server_handle.await;

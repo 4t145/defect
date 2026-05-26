@@ -22,13 +22,14 @@ use futures::future::BoxFuture;
 use crate::error::BoxError;
 use crate::event::{AgentEvent, PermissionResolution};
 use crate::fs::FsBackend;
-use crate::llm::{Message, ProviderError};
+use crate::llm::{Message, ModelInfo, ProviderError, ProviderInfo};
 use crate::tool::{Tool, ToolSchema};
 
 mod default;
 mod events;
 mod history;
 mod permissions;
+mod prompt;
 mod tool_registry;
 mod turn;
 
@@ -36,8 +37,9 @@ pub use default::{DefaultAgentCore, DefaultAgentCoreBuilder, DefaultSession, uui
 pub use events::EventEmitter;
 pub use history::VecHistory;
 pub use permissions::PermissionGate;
+pub use prompt::resolve_system_prompt;
 pub use tool_registry::{CompositeRegistry, StaticToolRegistry, StaticToolRegistryBuilder};
-pub use turn::{TurnConfig, TurnRequestLimit, TurnRunner};
+pub use turn::{BasePromptConfig, PromptConfig, TurnConfig, TurnRequestLimit, TurnRunner};
 
 /// 进程级 agent 根对象。
 ///
@@ -145,6 +147,28 @@ pub trait SessionObserver: Send + Sync {
 /// 在 `defect-acp` 与主循环之间共享。
 pub trait Session: Send + Sync {
     fn id(&self) -> &SessionId;
+
+    /// 当前 session 使用的 provider 元信息。
+    fn provider_info(&self) -> ProviderInfo;
+
+    /// 当前 session 使用的模型 id。
+    fn current_model(&self) -> String;
+
+    /// 列出当前 provider 对此 session 可用的模型候选。
+    ///
+    /// # Errors
+    ///
+    /// 当 provider 拉取模型列表失败时返回 [`ProviderError`]。
+    fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>>;
+
+    /// 切换当前 session 的模型。
+    ///
+    /// 当前进行中的 turn 保持原模型；后续 turn 使用新模型。
+    ///
+    /// # Errors
+    ///
+    /// 当 provider 拉取模型列表失败，或请求的模型不存在时返回 [`ProviderError`]。
+    fn set_model(&self, model_id: String) -> BoxFuture<'_, Result<(), ProviderError>>;
 
     /// 订阅事件流。三个独立消费者（acp / storage / tracing）各自调一次，
     /// 互不影响——内部用 mpsc 配 fan-out 保证慢消费者只 backpressure

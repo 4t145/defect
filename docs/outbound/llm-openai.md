@@ -66,7 +66,7 @@ OAS 里 `securitySchemes.ApiKeyAuth` 是 HTTP Bearer，codegen 出来的 `AuthCo
 形态与 Anthropic 一致（[`llm-anthropic.md`](./llm-anthropic.md) §4），不再重述。差别：
 
 - `base_url` 默认 `https://api.openai.com/v1`，可用 `OPENAI_BASE_URL` 覆盖。
-- 兼容厂商常用 base_url：`https://api.deepseek.com/v1`、`https://api.together.xyz/v1`、`http://localhost:8000/v1`（本地 vllm）。
+- 兼容厂商常用 base_url：`https://api.deepseek.com`、`https://api.together.xyz/v1`、`http://localhost:8000/v1`（本地 vllm）。
 
 ## 4. `complete` 实现
 

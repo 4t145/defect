@@ -11,7 +11,7 @@
 //! 默认 `all`。
 //!
 //! 可选 env：
-//! - `DEEPSEEK_BASE_URL`：覆盖默认 `https://api.deepseek.com/v1`
+//! - `DEEPSEEK_BASE_URL`：覆盖默认 `https://api.deepseek.com`
 //! - `DEEPSEEK_MODEL`：覆盖默认模型 `deepseek-v4-flash`
 //! - `RUST_LOG=defect_llm=debug` 打开协议层调试日志
 //!

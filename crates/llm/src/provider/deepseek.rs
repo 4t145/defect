@@ -1,19 +1,10 @@
 //! DeepSeek provider。
 //!
-//! DeepSeek 走 OpenAI Chat Completions 兼容协议（`POST /chat/completions`，
-//! `GET /models`），所以这里**复用** [`super::openai::OpenAiProvider`] 跑
-//! transport / wire / 协议解码，外面只换：
-//!
-//! - **默认 base_url**：`https://api.deepseek.com/v1`，可由 `DEEPSEEK_BASE_URL`
-//!   或显式 config 覆盖
-//! - **默认凭证 env**：`DEEPSEEK_API_KEY`（兼容写法 `OPENAI_API_KEY` 也认）
-//! - **vendor / display_name**：`info()` 报 `"deepseek"` / `"DeepSeek Chat"`
-//! - **capabilities.thinking**：`Supported`（DeepSeek v4 系列原生发
-//!   `delta.reasoning_content`，协议层已经把它翻成 `ThinkingDelta`）
-//!
-//! 模型表（`deepseek-v4-flash` / `deepseek-v4-pro` 的 context_window /
-//! thinking_echo 等）维护在 `provider/openai.rs` 的硬编码表里，无需在
-//! 这里重复。
+//! DeepSeek 走 OpenAI Chat Completions 兼容协议，所以这里复用
+//! [`super::openai::OpenAiProvider`] 处理 chat / transport / 协议解码。
+//! 唯一单独 override 的是 `GET /models`：DeepSeek 返回的 model schema
+//! 缺少 OpenAI OAS 中要求的 `created` 字段，不能直接复用 OpenAI 生成的
+//! wire 类型。
 
 use std::env;
 use std::sync::Arc;
@@ -22,19 +13,22 @@ use defect_agent::llm::{
     Capabilities, CompletionRequest, FeatureSupport, LlmProvider, ModelInfo, ProtocolId,
     ProviderError, ProviderInfo, ProviderStream, ThinkingEcho,
 };
+use futures::FutureExt;
 use futures::future::BoxFuture;
+use http::HeaderValue;
+use http::Request;
+use serde::Deserialize;
+use toac::{MakeRequest, ParseResponse};
 use tokio_util::sync::CancellationToken;
+use tower::Service;
 
 use super::openai::{OpenAiConfig, OpenAiProvider};
 
-const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1";
+const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 const API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 const BASE_URL_ENV: &str = "DEEPSEEK_BASE_URL";
 
 /// DeepSeek provider 配置。
-///
-/// 字段语义同 [`OpenAiConfig`] 的相应字段；缺省时按 `DEEPSEEK_*` env 解析，
-/// `api_key` 还会兜底到 `OPENAI_API_KEY`，方便共享凭证的开发环境。
 #[derive(Debug, Default, Clone)]
 pub struct DeepSeekConfig {
     pub api_key: Option<String>,
@@ -65,13 +59,6 @@ impl DeepSeekConfig {
 }
 
 /// DeepSeek provider。
-///
-/// 形态上是个 thin wrapper：对外实现 [`LlmProvider`]，对内全部委托给一个
-/// 配好 base_url + capabilities 的 [`OpenAiProvider`]，再把 `info()` 换成
-/// `"deepseek"`。这样保证：
-///
-/// 1. wire/protocol 改动两边自动同步，不会漂
-/// 2. DeepSeek 的 `reasoning_content` 已经在协议层处理，无需 provider 介入
 #[derive(Debug)]
 pub struct DeepSeekProvider {
     inner: Arc<OpenAiProvider>,
@@ -79,11 +66,9 @@ pub struct DeepSeekProvider {
 }
 
 impl DeepSeekProvider {
-    /// 装配 DeepSeek provider。
-    ///
     /// # Errors
     ///
-    /// 缺凭证 / TLS 客户端构建失败时返回 [`ProviderError`]。
+    /// 缺凭证或底层 HTTP 客户端初始化失败时返回错误。
     pub fn new(config: DeepSeekConfig) -> Result<Self, ProviderError> {
         let openai_cfg = OpenAiConfig {
             api_key: config.resolve_api_key(),
@@ -92,9 +77,9 @@ impl DeepSeekProvider {
             project: None,
             capabilities_override: Some(default_deepseek_capabilities()),
         };
-        let inner = OpenAiProvider::new(openai_cfg)?;
+        let inner = Arc::new(OpenAiProvider::new(openai_cfg)?);
         Ok(Self {
-            inner: Arc::new(inner),
+            inner,
             info: ProviderInfo {
                 vendor: "deepseek".into(),
                 protocol: ProtocolId::OpenAiChat,
@@ -104,11 +89,6 @@ impl DeepSeekProvider {
     }
 }
 
-/// DeepSeek provider 默认能力矩阵。
-///
-/// 与 OpenAI 默认差在 `thinking`：DeepSeek v4 系列原生流式发 reasoning，
-/// 协议层已支持 → 标 `Supported`。`vision` 标 `Unsupported`：
-/// 截至 2026 DeepSeek 公开 API 还没多模态输入；上层裁图前会查能力。
 fn default_deepseek_capabilities() -> Capabilities {
     Capabilities {
         tool_calls: FeatureSupport::Supported,
@@ -116,10 +96,6 @@ fn default_deepseek_capabilities() -> Capabilities {
         thinking: FeatureSupport::Supported,
         vision: FeatureSupport::Unsupported,
         prompt_cache: FeatureSupport::Supported,
-        // DeepSeek v4 系列必须回放 reasoning_content。provider 默认走保守
-        // Forbidden（用于未识别的模型 id），模型级覆盖走
-        // [`ModelCapabilityOverrides::thinking_echo`]（见 provider/openai.rs
-        // 硬编码表）。
         thinking_echo: ThinkingEcho::Forbidden,
     }
 }
@@ -134,7 +110,26 @@ impl LlmProvider for DeepSeekProvider {
     }
 
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
-        self.inner.list_models()
+        async move {
+            let request = DeepSeekListModelsRequest {};
+            let mut client = self.inner.client();
+            let response = client
+                .call(request)
+                .await
+                .map_err(super::openai::call_error_to_provider)?;
+
+            let models = response
+                .data
+                .into_iter()
+                .map(|model| {
+                    self.inner
+                        .model_info(&model.id)
+                        .unwrap_or_else(|| model.into())
+                })
+                .collect();
+            Ok(models)
+        }
+        .boxed()
     }
 
     fn model_info(&self, model_id: &str) -> Option<ModelInfo> {
@@ -147,5 +142,76 @@ impl LlmProvider for DeepSeekProvider {
         cancel: CancellationToken,
     ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
         self.inner.complete(req, cancel)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DeepSeekListModelsRequest {}
+
+impl MakeRequest for DeepSeekListModelsRequest {
+    type Error = std::convert::Infallible;
+
+    /// # Errors
+    ///
+    /// 此实现不会构造请求错误。
+    async fn make_request(self) -> Result<Request<toac::body::Body>, Self::Error> {
+        let mut builder = Request::builder().method(http::Method::GET).uri("/models");
+        builder = builder.header(
+            http::header::ACCEPT,
+            HeaderValue::from_static("application/json"),
+        );
+        let mut request = builder
+            .body(toac::body::Body::empty())
+            .expect("valid DeepSeek /models request");
+        request
+            .extensions_mut()
+            .insert(toac::OperationSecurity(&[&["ApiKeyAuth"]]));
+        Ok(request)
+    }
+}
+
+impl toac::Operation for DeepSeekListModelsRequest {
+    type Response = DeepSeekModelsResponse;
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeepSeekModelsResponse {
+    data: Vec<DeepSeekModel>,
+}
+
+impl ParseResponse for DeepSeekModelsResponse {
+    type Error = toac::DecodeError;
+
+    /// # Errors
+    ///
+    /// 响应体不是合法 JSON，或与 DeepSeek `/models` 返回结构不匹配时失败。
+    async fn parse_response<B>(response: http::Response<B>) -> Result<Self, Self::Error>
+    where
+        B: http_body::Body<Data = bytes::Bytes> + Send + Sync + 'static,
+        B::Error: Into<toac::BoxError>,
+    {
+        let (_parts, body) = response.into_parts();
+        let decoder = toac::body::codec::json::JsonDecoder;
+        toac::body::codec::decode_body(&decoder, body)
+            .await
+            .map_err(|error| toac::DecodeError::Codec(error.into()))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DeepSeekModel {
+    id: String,
+}
+
+impl From<DeepSeekModel> for ModelInfo {
+    fn from(value: DeepSeekModel) -> Self {
+        Self {
+            id: value.id,
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            deprecated: false,
+            capabilities_overrides: Default::default(),
+        }
     }
 }

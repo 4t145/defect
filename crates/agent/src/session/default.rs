@@ -18,7 +18,7 @@
 //!   ├── events:   Arc<EventEmitter>
 //!   ├── permissions: Arc<PermissionGate>
 //!   ├── turn_lock: tokio::sync::Mutex<TurnSlot>
-//!   └── config: TurnConfig
+//!   └── config: RwLock<TurnConfig>
 //! ```
 //!
 //! turn 互斥用 `Mutex<TurnSlot>`：`run_turn` 在最外层 `try_lock`，失败即返回
@@ -26,7 +26,7 @@
 //! [`CancellationToken`]，`cancel_turn` 取出后 `cancel()`。
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use agent_client_protocol::schema::{ContentBlock, McpServer, SessionId, StopReason, ToolCallId};
 use dashmap::DashMap;
@@ -36,10 +36,11 @@ use tracing::Instrument;
 
 use crate::event::PermissionResolution;
 use crate::fs::FsBackend;
-use crate::llm::LlmProvider;
+use crate::llm::{LlmProvider, ModelInfo, ProviderError, ProviderErrorKind, ProviderInfo};
 use crate::policy::{AskWritesPolicy, SandboxPolicy};
 use crate::session::events::EventEmitter;
 use crate::session::permissions::PermissionGate;
+use crate::session::prompt::resolve_system_prompt;
 use crate::session::tool_registry::{CompositeRegistry, StaticToolRegistry};
 use crate::session::turn::{TurnConfig, TurnRunner};
 use crate::session::{
@@ -52,7 +53,7 @@ pub struct DefaultAgentCore {
     provider: Arc<dyn LlmProvider>,
     process_tools: Arc<dyn ToolRegistry>,
     policy: Arc<dyn SandboxPolicy>,
-    config: TurnConfig,
+    config: RwLock<TurnConfig>,
     loader: Option<Arc<dyn SessionLoader>>,
     session_tools: Option<Arc<dyn SessionToolFactory>>,
     observers: Vec<Arc<dyn SessionObserver>>,
@@ -126,7 +127,7 @@ impl DefaultAgentCoreBuilder {
             loader: self.loader,
             session_tools: self.session_tools,
             observers: self.observers,
-            config: self.config,
+            config: RwLock::new(self.config),
             sessions: DashMap::new(),
         }
     }
@@ -174,7 +175,12 @@ impl AgentCore for DefaultAgentCore {
                 events: Arc::new(EventEmitter::new()),
                 permissions: Arc::new(PermissionGate::new()),
                 turn_state: Mutex::new(TurnSlot::default()),
-                config: self.config.clone(),
+                config: RwLock::new(
+                    self.config
+                        .read()
+                        .expect("DefaultAgentCore config rwlock poisoned")
+                        .clone(),
+                ),
                 fs,
             }) as Arc<dyn Session>;
 
@@ -233,7 +239,12 @@ impl AgentCore for DefaultAgentCore {
                 events: Arc::new(EventEmitter::new()),
                 permissions: Arc::new(PermissionGate::new()),
                 turn_state: Mutex::new(TurnSlot::default()),
-                config: self.config.clone(),
+                config: RwLock::new(
+                    self.config
+                        .read()
+                        .expect("DefaultAgentCore config rwlock poisoned")
+                        .clone(),
+                ),
                 fs,
             }) as Arc<dyn Session>;
 
@@ -259,7 +270,7 @@ pub struct DefaultSession {
     /// 单 turn 互斥 + cancel 通道。`Some(token)` 表示有 turn 在跑；
     /// `None` 表示空闲。`std::sync::Mutex` 仅短暂持锁、不跨 await。
     turn_state: Mutex<TurnSlot>,
-    config: TurnConfig,
+    config: RwLock<TurnConfig>,
     /// session 级 fs 后端。由 [`AgentCore::create_session`] 注入；
     /// `TurnRunner` 把 `&dyn FsBackend` 借到 [`crate::tool::ToolContext`] 传给工具。
     fs: Arc<dyn FsBackend>,
@@ -290,6 +301,93 @@ impl Session for DefaultSession {
         &self.id
     }
 
+    fn provider_info(&self) -> ProviderInfo {
+        self.provider.info()
+    }
+
+    fn current_model(&self) -> String {
+        self.config
+            .read()
+            .expect("DefaultSession config rwlock poisoned")
+            .model
+            .clone()
+    }
+
+    fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
+        Box::pin(async move {
+            let allowed_models = self
+                .config
+                .read()
+                .expect("DefaultSession config rwlock poisoned")
+                .allowed_models
+                .clone();
+            match self.provider.list_models().await {
+                Ok(available_models) => Ok(filter_allowed_models(
+                    available_models,
+                    allowed_models.as_deref(),
+                )),
+                Err(err) => match allowed_models {
+                    Some(allowed_models) => {
+                        tracing::warn!(
+                            provider = %self.provider.info().vendor,
+                            error = %err,
+                            "provider list_models failed; falling back to configured allowed models"
+                        );
+                        Ok(fallback_allowed_models(
+                            self.provider.as_ref(),
+                            &allowed_models,
+                        ))
+                    }
+                    None => Err(err),
+                },
+            }
+        })
+    }
+
+    fn set_model(&self, model_id: String) -> BoxFuture<'_, Result<(), ProviderError>> {
+        Box::pin(async move {
+            let allowed_models = self
+                .config
+                .read()
+                .expect("DefaultSession config rwlock poisoned")
+                .allowed_models
+                .clone();
+            if let Some(allowed_models) = allowed_models.as_ref()
+                && !allowed_models.iter().any(|allowed| allowed == &model_id)
+            {
+                return Err(ProviderError::new(ProviderErrorKind::ModelNotFound {
+                    model: model_id,
+                }));
+            }
+
+            if self.provider.model_info(&model_id).is_some() {
+                let mut config = self
+                    .config
+                    .write()
+                    .expect("DefaultSession config rwlock poisoned");
+                config.model = model_id;
+                return Ok(());
+            }
+
+            let available_models = self.provider.list_models().await?;
+            let available_models =
+                filter_allowed_models(available_models, allowed_models.as_deref());
+            let known_model = available_models.iter().any(|model| model.id == model_id);
+            if !known_model {
+                return Err(ProviderError::new(ProviderErrorKind::ModelNotFound {
+                    model: model_id,
+                }));
+            }
+
+            let mut config = self
+                .config
+                .write()
+                .expect("DefaultSession config rwlock poisoned");
+            config.model = model_id;
+            Ok(())
+        })
+    }
+
     fn subscribe(&self) -> EventStream {
         self.events.subscribe()
     }
@@ -301,7 +399,7 @@ impl Session for DefaultSession {
         let span = tracing::info_span!(
             "turn",
             session_id = %short_id(self.id.0.as_ref()),
-            model = %self.config.model,
+            model = %self.current_model(),
         );
         Box::pin(
             async move {
@@ -323,6 +421,20 @@ impl Session for DefaultSession {
                     state: &self.turn_state,
                 };
 
+                let config = self
+                    .config
+                    .read()
+                    .expect("DefaultSession config rwlock poisoned")
+                    .clone();
+                let system_prompt = resolve_system_prompt(
+                    &self.cwd,
+                    &self.provider.info().vendor,
+                    &config.model,
+                    &config.base_prompt,
+                    &config.prompt,
+                    config.system_prompt.as_deref(),
+                )
+                .map_err(|err| TurnError::Internal(crate::error::BoxError::new(err)))?;
                 let runner = TurnRunner {
                     history: self.history.as_ref(),
                     tools: self.tools.as_ref(),
@@ -331,7 +443,8 @@ impl Session for DefaultSession {
                     events: self.events.clone(),
                     permissions: self.permissions.as_ref(),
                     cancel,
-                    config: &self.config,
+                    config: &config,
+                    system_prompt,
                     cwd: &self.cwd,
                     fs: self.fs.clone(),
                 };
@@ -359,6 +472,39 @@ impl Session for DefaultSession {
     fn resolve_permission(&self, id: ToolCallId, outcome: PermissionResolution) {
         self.permissions.resolve(&id, outcome);
     }
+}
+
+fn filter_allowed_models(
+    available_models: Vec<ModelInfo>,
+    allowed_models: Option<&[String]>,
+) -> Vec<ModelInfo> {
+    let Some(allowed_models) = allowed_models else {
+        return available_models;
+    };
+
+    available_models
+        .into_iter()
+        .filter(|model| allowed_models.iter().any(|allowed| allowed == &model.id))
+        .collect()
+}
+
+fn fallback_allowed_models(
+    provider: &dyn LlmProvider,
+    allowed_models: &[String],
+) -> Vec<ModelInfo> {
+    allowed_models
+        .iter()
+        .map(|model_id| {
+            provider.model_info(model_id).unwrap_or_else(|| ModelInfo {
+                id: model_id.clone(),
+                display_name: Some(model_id.clone()),
+                context_window: None,
+                max_output_tokens: None,
+                deprecated: false,
+                capabilities_overrides: Default::default(),
+            })
+        })
+        .collect()
 }
 
 /// v0 的 session id 生成：进程内单调递增 + 时间戳。引入 uuid crate 时再换。
