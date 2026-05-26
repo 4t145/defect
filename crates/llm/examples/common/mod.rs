@@ -17,7 +17,7 @@ use agent_client_protocol::schema::{
 };
 use defect_agent::event::AgentEvent;
 use defect_agent::fs::{FsBackend, NoopFsBackend};
-use defect_agent::llm::{LlmProvider, SamplingParams, ThinkingConfig};
+use defect_agent::llm::{LlmProvider, SamplingParams, ThinkingConfig, Usage};
 use defect_agent::policy::{OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
     AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
@@ -154,6 +154,14 @@ pub async fn run_turn_and_print(
     session: Arc<dyn Session>,
     prompt: &str,
 ) -> Result<(AcpStopReason, String, ToolHits), Box<dyn std::error::Error>> {
+    let (stop, text, hits, _usage) = run_turn_and_print_with_usage(session, prompt).await?;
+    Ok((stop, text, hits))
+}
+
+pub async fn run_turn_and_print_with_usage(
+    session: Arc<dyn Session>,
+    prompt: &str,
+) -> Result<(AcpStopReason, String, ToolHits, Usage), Box<dyn std::error::Error>> {
     let mut events = session.subscribe();
     let prompt_blocks = vec![ContentBlock::Text(TextContent::new(prompt))];
 
@@ -164,6 +172,7 @@ pub async fn run_turn_and_print(
     let mut text_buf = String::new();
     let mut thought_buf = String::new();
     let mut hits = ToolHits::default();
+    let mut usage = Usage::default();
 
     while let Some(ev) = events.next().await {
         match ev {
@@ -194,8 +203,12 @@ pub async fn run_turn_and_print(
                 let summary = first_text_content(&fields).unwrap_or_default();
                 println!("[tool finished] {summary}");
             }
-            AgentEvent::TurnEnded { reason, usage } => {
-                println!("\n[turn ended] reason={reason:?} usage={usage:?}");
+            AgentEvent::TurnEnded {
+                reason,
+                usage: turn_usage,
+            } => {
+                println!("\n[turn ended] reason={reason:?} usage={turn_usage:?}");
+                usage = turn_usage;
                 break;
             }
             _ => {}
@@ -204,7 +217,7 @@ pub async fn run_turn_and_print(
 
     let stop = turn.await??;
     hits.thought_text = thought_buf;
-    Ok((stop, text_buf, hits))
+    Ok((stop, text_buf, hits, usage))
 }
 
 #[derive(Debug, Default)]

@@ -45,3 +45,8 @@
 
 1. **运行 Clippy 检查**：执行 `cargo clippy` 检查是否存在 warning，修复所有 warning 后再继续。
 2. **格式化代码**：执行 `cargo fmt` 对代码进行格式化。
+
+## 测试
+
+- smoke 测试默认优先使用 `deepseek-v4-flash`。新增或维护真端点 smoke 时，如果场景本身不依赖更强模型，默认模型应设为 `deepseek-v4-flash`。
+- 只有在场景明确依赖其它模型特性时，才切换到更高规格模型，并在对应 smoke 说明中写清楚原因。

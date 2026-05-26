@@ -7,7 +7,7 @@
 //!   cargo run -p defect-llm --example deepseek_smoke -- [scenario]
 //! ```
 //!
-//! `[scenario]` ∈ `list-models | text | tool | thinking | thinking-tool | all`，
+//! `[scenario]` ∈ `list-models | text | tool | thinking | thinking-tool | cache-smoke | all`，
 //! 默认 `all`。
 //!
 //! 可选 env：
@@ -34,7 +34,8 @@ use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 
 use common::{
     EXIT_FAIL, EXIT_OK, build_session, env_string, init_tracing, print_fail, print_pass,
-    print_skip, run_turn_and_print, sampling_with_thinking, scenario_from_args,
+    print_skip, run_turn_and_print, run_turn_and_print_with_usage, sampling_with_thinking,
+    scenario_from_args,
 };
 
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
@@ -50,6 +51,18 @@ const THINKING_PROMPT: &str = "Think step by step: a farmer has 17 sheep and all
 const THINKING_TOOL_PROMPT: &str = "Think briefly about which message to echo, then call \
      the `echo` tool with msg=\"hello from thinking-tool\", and after it returns \
      summarize what came back in one sentence.";
+const CACHE_SMOKE_PROMPT: &str = concat!(
+    "You are validating prompt-cache reuse for a deterministic smoke test. ",
+    "Read the stable instructions below carefully and then answer with exactly one short sentence. ",
+    "Stable block A: defect is a headless ACP agent. Stable block B: this request intentionally repeats a long prefix. ",
+    "Stable block C: do not call tools, do not ask questions, do not add bullet points. ",
+    "Stable block D: summarize the phrase 'cache smoke baseline' in plain English. ",
+    "Stable block E: keep the response under twelve words. ",
+    "Stable block F: this paragraph exists only to make the prompt prefix long enough for cache validation. ",
+    "Stable block G: repeat the key idea mentally but not verbatim; the important property is identical prompt bytes across runs. ",
+    "Stable block H: avoid markdown, code fences, and JSON. ",
+    "Stable block I: answer once and stop."
+);
 
 #[tokio::main]
 async fn main() {
@@ -110,7 +123,15 @@ fn scenarios_for(name: &str) -> Vec<&'static str> {
         "tool" => vec!["tool"],
         "thinking" => vec!["thinking"],
         "thinking-tool" => vec!["thinking-tool"],
-        _ => vec!["list-models", "text", "tool", "thinking", "thinking-tool"],
+        "cache-smoke" => vec!["cache-smoke"],
+        _ => vec![
+            "list-models",
+            "text",
+            "tool",
+            "thinking",
+            "thinking-tool",
+            "cache-smoke",
+        ],
     }
 }
 
@@ -128,6 +149,7 @@ async fn run_scenario(label: &str, provider: Arc<dyn LlmProvider>, model: &str) 
         "tool" => scenario_tool(provider, model).await,
         "thinking" => scenario_thinking(provider, model).await,
         "thinking-tool" => scenario_thinking_tool_multi_turn(provider, model).await,
+        "cache-smoke" => scenario_cache_smoke(provider, model).await,
         other => Err(format!("unknown scenario {other}")),
     };
     match res {
@@ -254,5 +276,48 @@ async fn scenario_thinking(
              check upstream changed shape"
         )));
     }
+    Ok(None)
+}
+
+async fn scenario_cache_smoke(
+    provider: Arc<dyn LlmProvider>,
+    model: &str,
+) -> Result<Option<String>, String> {
+    let first_session = build_session(provider.clone(), model, SamplingParams::default()).await;
+    let (first_stop, first_text, _first_hits, first_usage) =
+        run_turn_and_print_with_usage(first_session, CACHE_SMOKE_PROMPT)
+            .await
+            .map_err(|e| e.to_string())?;
+    if !matches!(first_stop, AcpStopReason::EndTurn) {
+        return Err(format!("unexpected first stop reason: {first_stop:?}"));
+    }
+    if first_text.trim().is_empty() {
+        return Err("empty assistant text on first cache-smoke run".to_string());
+    }
+
+    let second_session = build_session(provider, model, SamplingParams::default()).await;
+    let (second_stop, second_text, _second_hits, second_usage) =
+        run_turn_and_print_with_usage(second_session, CACHE_SMOKE_PROMPT)
+            .await
+            .map_err(|e| e.to_string())?;
+    if !matches!(second_stop, AcpStopReason::EndTurn) {
+        return Err(format!("unexpected second stop reason: {second_stop:?}"));
+    }
+    if second_text.trim().is_empty() {
+        return Err("empty assistant text on second cache-smoke run".to_string());
+    }
+
+    let first_cache_read = first_usage.cache_read_input_tokens.unwrap_or(0);
+    let second_cache_read = second_usage.cache_read_input_tokens.unwrap_or(0);
+    println!(
+        "[cache-smoke] first_cache_read={first_cache_read} second_cache_read={second_cache_read}"
+    );
+
+    if second_cache_read == 0 {
+        return Err(format!(
+            "expected cache_read_input_tokens on second run, got first={first_cache_read} second=0"
+        ));
+    }
+
     Ok(None)
 }
