@@ -3,6 +3,7 @@
 //! 把外部 MCP server 暴露的工具包装为 [`defect_agent`] 的 per-session
 //! 工具表。
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -44,12 +45,19 @@ pub enum McpAdapterError {
 
 /// 最小 MCP 工厂。
 #[derive(Debug, Default, Clone)]
-pub struct McpToolFactory;
+pub struct McpToolFactory {
+    default_servers: Vec<McpServer>,
+}
 
 impl McpToolFactory {
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_default_servers(default_servers: Vec<McpServer>) -> Self {
+        Self { default_servers }
     }
 }
 
@@ -59,6 +67,7 @@ impl SessionToolFactory for McpToolFactory {
         cwd: PathBuf,
         mcp_servers: Vec<McpServer>,
     ) -> BoxFuture<'_, Result<Arc<dyn ToolRegistry>, BoxError>> {
+        let mcp_servers = merge_mcp_servers(&self.default_servers, &mcp_servers);
         Box::pin(async move {
             let mut builder = StaticToolRegistryBuilder::default();
             for server in mcp_servers {
@@ -69,6 +78,32 @@ impl SessionToolFactory for McpToolFactory {
             }
             Ok(Arc::new(builder.build()) as Arc<dyn ToolRegistry>)
         })
+    }
+}
+
+fn merge_mcp_servers(
+    default_servers: &[McpServer],
+    session_servers: &[McpServer],
+) -> Vec<McpServer> {
+    let session_server_names = session_servers
+        .iter()
+        .map(mcp_server_name)
+        .collect::<HashSet<_>>();
+
+    default_servers
+        .iter()
+        .filter(|server| !session_server_names.contains(mcp_server_name(server)))
+        .cloned()
+        .chain(session_servers.iter().cloned())
+        .collect()
+}
+
+fn mcp_server_name(server: &McpServer) -> &str {
+    match server {
+        McpServer::Stdio(stdio) => &stdio.name,
+        McpServer::Http(http) => &http.name,
+        McpServer::Sse(sse) => &sse.name,
+        other => unreachable!("unsupported MCP transport variant: {other:?}"),
     }
 }
 

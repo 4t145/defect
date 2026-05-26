@@ -1,8 +1,10 @@
-use agent_client_protocol::schema::{Content as AcpContent, ToolCallContent};
+use agent_client_protocol::schema::{
+    Content as AcpContent, McpServer, McpServerSse, McpServerStdio, ToolCallContent,
+};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::json;
 
-use crate::{build_call_params, completed_event};
+use crate::{build_call_params, completed_event, merge_mcp_servers};
 
 #[test]
 fn build_call_params_accepts_object_args() {
@@ -66,4 +68,29 @@ fn completed_event_ignores_non_text_content() {
     };
     assert!(fields.content.is_none());
     assert!(fields.raw_output.is_some());
+}
+
+#[test]
+fn session_mcp_servers_override_config_defaults_by_name() {
+    let merged = merge_mcp_servers(
+        &[
+            McpServer::Stdio(McpServerStdio::new("echo", "/usr/bin/default-echo")),
+            McpServer::Sse(McpServerSse::new("docs", "http://127.0.0.1:3000/mcp")),
+        ],
+        &[McpServer::Stdio(McpServerStdio::new(
+            "echo",
+            "/usr/bin/session-echo",
+        ))],
+    );
+
+    assert_eq!(merged.len(), 2);
+    assert!(matches!(
+        &merged[0],
+        McpServer::Sse(server) if server.name == "docs"
+    ));
+    assert!(matches!(
+        &merged[1],
+        McpServer::Stdio(server)
+            if server.name == "echo" && server.command == std::path::PathBuf::from("/usr/bin/session-echo")
+    ));
 }

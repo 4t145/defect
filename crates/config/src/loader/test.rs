@@ -192,6 +192,77 @@ mode = "read-only"
 }
 
 #[test]
+fn loads_mcp_sections_into_effective_config() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[mcp]
+enabled_servers = ["echo", "docs"]
+
+[mcp.servers.echo]
+transport = "stdio"
+command = "mcp-echo"
+args = ["--port", "9000"]
+
+[mcp.servers.echo.env]
+MCP_TEST_VALUE = "from-config"
+
+[mcp.servers.docs]
+transport = "sse"
+url = "http://127.0.0.1:8123/mcp"
+
+[mcp.servers.docs.headers]
+x-mcp-test = "enabled"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(loaded.effective.mcp.enabled_servers, ["echo", "docs"]);
+    assert!(matches!(
+        loaded.effective.mcp.servers.get("echo"),
+        Some(crate::types::McpServerConfig::Stdio(server))
+            if server.command == "mcp-echo"
+                && server.args == vec!["--port".to_string(), "9000".to_string()]
+                && server.env.get("MCP_TEST_VALUE").map(String::as_str) == Some("from-config")
+    ));
+    assert!(matches!(
+        loaded.effective.mcp.servers.get("docs"),
+        Some(crate::types::McpServerConfig::Sse(server))
+            if server.url == "http://127.0.0.1:8123/mcp"
+                && server.headers.get("x-mcp-test").map(String::as_str) == Some("enabled")
+    ));
+}
+
+#[test]
+fn rejects_enabled_mcp_server_names_without_matching_definitions() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    let config_path = tmp.path().join("xdg/defect/config.toml");
+    write(
+        &config_path,
+        r#"
+[mcp]
+enabled_servers = ["missing"]
+"#,
+    );
+
+    let err = load_config(test_options(&tmp)).expect_err("invalid config");
+
+    match err {
+        ConfigError::Invalid { path, message } => {
+            assert_eq!(path, Path::new("<merged>"));
+            assert!(message.contains("undefined server `missing`"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
 fn warns_on_unknown_keys_with_source_path() {
     let tmp = TempDir::new().expect("tmp");
     let repo = tmp.path().join("repo");

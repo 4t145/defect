@@ -4,6 +4,7 @@
 //! 可直接用于启动的强类型配置对象。
 
 mod loader;
+mod mcp;
 mod overrides;
 mod types;
 
@@ -12,6 +13,7 @@ pub use overrides::parse_cli_override;
 pub use types::{
     AnthropicConfigFile, BashToolConfig, CliConfig, CliOverrides, ConfigError, ConfigLayerEntry,
     ConfigLayerStack, ConfigSource, ConfigWarning, DeepSeekConfigFile, EffectiveConfig,
-    FsToolConfig, LoadConfigOptions, LoadedConfig, OpenAiConfigFile, OtlpTracingConfig,
-    ProviderConfigs, ProviderKind, SandboxConfig, SandboxMode, ToolsConfig, TracingConfig,
+    FsToolConfig, LoadConfigOptions, LoadedConfig, McpConfig, McpRemoteServerConfig,
+    McpServerConfig, McpStdioServerConfig, OpenAiConfigFile, OtlpTracingConfig, ProviderConfigs,
+    ProviderKind, SandboxConfig, SandboxMode, ToolsConfig, TracingConfig,
 };

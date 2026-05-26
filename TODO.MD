@@ -29,6 +29,7 @@
 | internal | 错误类型分层（agent / provider / tool / sandbox）              | `docs/internal/errors.md`                                               | P0     | 已完成   |
 | internal | LLM thinking 多轮 round-trip（reasoning_content 回放）         | `docs/internal/thinking-roundtrip.md`                                   | P0     | 已完成   |
 | internal | 配置加载与合并（用户/项目/CLI 覆盖）                           | `docs/internal/config.md`                                               | P1     | 进行中   |
+| internal | 入口配置接入默认 MCP servers（`mcp.enabled_servers` / `mcp.servers.*`） | `docs/internal/config.md`                                               | P1     | 已完成   |
 | internal | 沙箱策略决策器（read-only / auto / full + 路径白名单）         | `docs/internal/sandbox-policy.md`                                       | P0     | 已完成   |
 | internal | 内置工具：fs（read / write / edit）                            | `docs/internal/tools-fs.md`                                             | P0     | 已完成   |
 | internal | 内置工具：bash 执行                                            | `docs/internal/tools-bash.md`                                           | P0     | 已完成   |

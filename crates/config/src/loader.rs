@@ -7,6 +7,7 @@ use defect_agent::llm::SamplingParams;
 use defect_agent::session::{TurnConfig, TurnRequestLimit};
 use toml::Value as TomlValue;
 
+use crate::mcp::{is_known_mcp_key, is_known_mcp_prefix, resolve_mcp_config};
 use crate::overrides::{
     build_cli_layer, merge_toml_values, remove_toml_path, remove_toml_table_key,
 };
@@ -94,7 +95,7 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
             path: PathBuf::from("<merged>"),
             message: err.to_string(),
         })?;
-    let effective = build_effective_config(parsed);
+    let effective = build_effective_config(Path::new("<merged>"), parsed)?;
 
     Ok(LoadedConfig {
         layers: ConfigLayerStack { layers },
@@ -131,7 +132,7 @@ pub fn load_dotenv_compat(cwd: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn build_effective_config(config: ConfigToml) -> EffectiveConfig {
+fn build_effective_config(path: &Path, config: ConfigToml) -> Result<EffectiveConfig, ConfigError> {
     let provider = config.default.provider.unwrap_or_default();
     let provider_model = match provider {
         ProviderKind::Echo => Some(DEFAULT_ECHO_MODEL.to_string()),
@@ -186,7 +187,7 @@ fn build_effective_config(config: ConfigToml) -> EffectiveConfig {
         // 保持 default sampling 显式落在 effective config 中，方便后续扩字段。
     }
 
-    EffectiveConfig {
+    Ok(EffectiveConfig {
         cli: CliConfig { provider, model },
         turn,
         providers: ProviderConfigs {
@@ -244,7 +245,11 @@ fn build_effective_config(config: ConfigToml) -> EffectiveConfig {
                 endpoint: otlp.endpoint,
             }),
         },
-    }
+        mcp: resolve_mcp_config(path, config.mcp).map_err(|message| ConfigError::Invalid {
+            path: path.to_path_buf(),
+            message,
+        })?,
+    })
 }
 
 fn sanitize_shared_project_layer(
@@ -431,7 +436,8 @@ fn is_known_config_key(key: &str) -> bool {
             | "sandbox.mode"
             | "tracing.filter"
             | "tracing.otlp.endpoint"
-    )
+            | "mcp.enabled_servers"
+    ) || is_known_mcp_key(key)
 }
 
 fn is_known_config_prefix(key: &str) -> bool {
@@ -449,7 +455,8 @@ fn is_known_config_prefix(key: &str) -> bool {
             | "sandbox"
             | "tracing"
             | "tracing.otlp"
-    )
+            | "mcp"
+    ) || is_known_mcp_prefix(key)
 }
 
 fn resolve_user_config_path(opts: &LoadConfigOptions) -> Result<PathBuf, ConfigError> {

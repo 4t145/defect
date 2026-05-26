@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -135,6 +136,7 @@ pub struct EffectiveConfig {
     pub tools: ToolsConfig,
     pub sandbox: SandboxConfig,
     pub tracing: TracingConfig,
+    pub mcp: McpConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,6 +253,40 @@ pub struct OtlpTracingConfig {
     pub endpoint: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct McpConfig {
+    pub enabled_servers: Vec<String>,
+    pub servers: BTreeMap<String, McpServerConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpServerConfig {
+    Stdio(McpStdioServerConfig),
+    Http(McpRemoteServerConfig),
+    Sse(McpRemoteServerConfig),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpStdioServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpRemoteServerConfig {
+    pub url: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum McpTransportKind {
+    Stdio,
+    Http,
+    Sse,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct ConfigToml {
     #[serde(default)]
@@ -265,6 +301,8 @@ pub(crate) struct ConfigToml {
     pub(crate) sandbox: SandboxSection,
     #[serde(default)]
     pub(crate) tracing: TracingSection,
+    #[serde(default)]
+    pub(crate) mcp: McpSection,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -341,4 +379,20 @@ pub(crate) struct TracingSection {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct OtlpTracingSection {
     pub(crate) endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct McpSection {
+    pub(crate) enabled_servers: Option<Vec<String>>,
+    pub(crate) servers: Option<BTreeMap<String, McpServerSection>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct McpServerSection {
+    pub(crate) transport: Option<McpTransportKind>,
+    pub(crate) command: Option<String>,
+    pub(crate) args: Option<Vec<String>>,
+    pub(crate) env: Option<BTreeMap<String, String>>,
+    pub(crate) url: Option<String>,
+    pub(crate) headers: Option<BTreeMap<String, String>>,
 }

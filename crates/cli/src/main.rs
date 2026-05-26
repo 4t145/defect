@@ -14,8 +14,12 @@
 //! `DEEPSEEK_API_KEY` 读取。
 
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use agent_client_protocol::schema::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
 use clap::{Parser, ValueEnum};
 use defect_acp::EchoProvider;
 use defect_agent::llm::LlmProvider;
@@ -26,8 +30,8 @@ use defect_agent::session::{
     AgentCore, DefaultAgentCore, StaticToolRegistry, ToolRegistry, TurnConfig,
 };
 use defect_config::{
-    CliOverrides, LoadConfigOptions, LoadedConfig, ProviderKind as ConfigProviderKind, SandboxMode,
-    load_dotenv_compat, parse_cli_override,
+    CliOverrides, LoadConfigOptions, LoadedConfig, McpServerConfig as ConfigMcpServerConfig,
+    ProviderKind as ConfigProviderKind, SandboxMode, load_dotenv_compat, parse_cli_override,
 };
 use defect_llm::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
@@ -63,18 +67,7 @@ async fn main() -> anyhow::Result<()> {
         "starting defect ACP server on stdio"
     );
 
-    let tools: Arc<dyn ToolRegistry> = Arc::new(
-        StaticToolRegistry::builder()
-            .insert(Arc::new(BashTool::from_config(
-                &config.effective.tools.bash,
-            )))
-            .insert(Arc::new(ReadFileTool::from_config(
-                &config.effective.tools.fs,
-            )))
-            .insert(Arc::new(WriteFileTool::new()))
-            .insert(Arc::new(EditFileTool::new()))
-            .build(),
-    );
+    let tools = build_process_tools(&config);
     let storage = Arc::new(StorageObserver::new(default_sessions_root()?));
     let agent = DefaultAgentCore::builder()
         .provider(provider)
@@ -82,7 +75,9 @@ async fn main() -> anyhow::Result<()> {
         .policy(build_policy(config.effective.sandbox.mode))
         .observe_session(storage.clone())
         .session_loader(storage)
-        .session_tool_factory(Arc::new(McpToolFactory::new()))
+        .session_tool_factory(Arc::new(McpToolFactory::with_default_servers(
+            build_default_mcp_servers(&config),
+        )))
         .config(turn_config)
         .build();
     let agent: Arc<dyn AgentCore> = Arc::new(agent);
@@ -167,6 +162,64 @@ fn build_provider(config: &LoadedConfig) -> anyhow::Result<(Arc<dyn LlmProvider>
     };
 
     Ok((provider, config.effective.turn.clone()))
+}
+
+fn build_process_tools(config: &LoadedConfig) -> Arc<dyn ToolRegistry> {
+    Arc::new(
+        StaticToolRegistry::builder()
+            .insert(Arc::new(BashTool::from_config(
+                &config.effective.tools.bash,
+            )))
+            .insert(Arc::new(ReadFileTool::from_config(
+                &config.effective.tools.fs,
+            )))
+            .insert(Arc::new(WriteFileTool::new()))
+            .insert(Arc::new(EditFileTool::new()))
+            .build(),
+    )
+}
+
+fn build_default_mcp_servers(config: &LoadedConfig) -> Vec<McpServer> {
+    config
+        .effective
+        .mcp
+        .enabled_servers
+        .iter()
+        .filter_map(|name| {
+            let server = config.effective.mcp.servers.get(name)?;
+            Some(match server {
+                ConfigMcpServerConfig::Stdio(server) => McpServer::Stdio(
+                    McpServerStdio::new(name, PathBuf::from(&server.command))
+                        .args(server.args.clone())
+                        .env(
+                            server
+                                .env
+                                .iter()
+                                .map(|(name, value)| EnvVariable::new(name, value))
+                                .collect(),
+                        ),
+                ),
+                ConfigMcpServerConfig::Http(server) => McpServer::Http(
+                    McpServerHttp::new(name, &server.url).headers(
+                        server
+                            .headers
+                            .iter()
+                            .map(|(name, value)| HttpHeader::new(name, value))
+                            .collect(),
+                    ),
+                ),
+                ConfigMcpServerConfig::Sse(server) => McpServer::Sse(
+                    McpServerSse::new(name, &server.url).headers(
+                        server
+                            .headers
+                            .iter()
+                            .map(|(name, value)| HttpHeader::new(name, value))
+                            .collect(),
+                    ),
+                ),
+            })
+        })
+        .collect()
 }
 
 fn build_policy(mode: SandboxMode) -> Arc<dyn SandboxPolicy> {
