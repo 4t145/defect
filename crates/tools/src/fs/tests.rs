@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::{ContentBlock, ToolCallContent};
 use defect_agent::fs::FsBackend;
+use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{Tool, ToolContext, ToolError, ToolEvent};
 use defect_config::FsToolConfig;
 use futures::StreamExt;
@@ -40,7 +41,8 @@ impl Harness {
     }
 
     fn ctx(&self) -> ToolContext<'_> {
-        ToolContext::new(&self.root, self.cancel.clone(), self.fs.clone())
+        let shell: Arc<dyn ShellBackend> = Arc::new(NoopShellBackend);
+        ToolContext::new(&self.root, self.cancel.clone(), self.fs.clone(), shell)
     }
 
     fn write_file(&self, name: &str, bytes: impl AsRef<[u8]>) {
@@ -521,7 +523,8 @@ async fn case23_edit_detects_external_modification_between_read_and_write() {
         bump_pending: std::sync::atomic::AtomicBool::new(true),
         target,
     });
-    let ctx = ToolContext::new(&h.root, h.cancel.clone(), advancer);
+    let shell: Arc<dyn ShellBackend> = Arc::new(NoopShellBackend);
+    let ctx = ToolContext::new(&h.root, h.cancel.clone(), advancer, shell);
 
     let tool = EditFileTool::new();
     let events = drive(tool.execute(

@@ -36,6 +36,8 @@ const PROMPT_CACHE_KEY_PREFIX: &str = "defect:chat:v1:";
 const PROMPT_CACHE_KEY_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const PROMPT_CACHE_KEY_PRIME: u64 = 0x0000_0001_0000_01b3;
 
+type UsageParser = fn(Option<&serde_json::Value>, &wire::CompletionUsage) -> Usage;
+
 /// 把 [`CompletionRequest`] 编为 wire 请求体。
 ///
 /// 关键映射决策（详见 `docs/outbound/llm-openai.md` §6.1）：
@@ -524,7 +526,7 @@ pub fn decode_stream(
     sse: SseEventStream,
     cancel: CancellationToken,
 ) -> impl Stream<Item = Result<ProviderChunk, ProviderError>> + Send {
-    decode_stream_generic(sse, cancel)
+    decode_stream_with_usage_parser(sse, cancel, usage_from_wire)
 }
 
 /// 与 [`decode_stream`] 同形态，但对入参 `Stream` 类型泛化，方便测试
@@ -537,12 +539,34 @@ where
     S: Stream<Item = Result<Sse, E>> + Send + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
+    decode_stream_generic_with_usage_parser(sse, cancel, usage_from_wire)
+}
+
+/// 与 [`decode_stream`] 同形态，但允许兼容厂商覆写 usage 解析逻辑。
+pub(crate) fn decode_stream_with_usage_parser(
+    sse: SseEventStream,
+    cancel: CancellationToken,
+    usage_parser: UsageParser,
+) -> impl Stream<Item = Result<ProviderChunk, ProviderError>> + Send {
+    decode_stream_generic_with_usage_parser(sse, cancel, usage_parser)
+}
+
+fn decode_stream_generic_with_usage_parser<S, E>(
+    sse: S,
+    cancel: CancellationToken,
+    usage_parser: UsageParser,
+) -> impl Stream<Item = Result<ProviderChunk, ProviderError>> + Send
+where
+    S: Stream<Item = Result<Sse, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
     OpenAiSseDecoder {
         inner: sse,
         cancel,
         state: DecoderState::default(),
         pending: Vec::new(),
         finished: false,
+        usage_parser,
         _err: std::marker::PhantomData::<E>,
     }
 }
@@ -555,6 +579,7 @@ struct OpenAiSseDecoder<S, E> {
     /// + Stop）。先存到 `pending`，poll_next 用 `pop()` 逐个吐。
     pending: Vec<Result<ProviderChunk, ProviderError>>,
     finished: bool,
+    usage_parser: UsageParser,
     _err: std::marker::PhantomData<E>,
 }
 
@@ -608,7 +633,7 @@ where
                     ))));
                 }
                 Poll::Ready(Some(Ok(sse))) => {
-                    process_sse(&mut this.state, sse, &mut this.pending);
+                    process_sse(&mut this.state, sse, &mut this.pending, this.usage_parser);
                     if this.state.done || this.state.fatal {
                         this.finished = true;
                     }
@@ -622,6 +647,7 @@ fn process_sse(
     state: &mut DecoderState,
     sse: Sse,
     out: &mut Vec<Result<ProviderChunk, ProviderError>>,
+    usage_parser: UsageParser,
 ) {
     let data = match sse.data {
         Some(d) => d,
@@ -658,7 +684,7 @@ fn process_sse(
         }
     };
 
-    handle_chunk(state, &raw, evt, out);
+    handle_chunk(state, &raw, evt, out, usage_parser);
 }
 
 fn handle_chunk(
@@ -666,6 +692,7 @@ fn handle_chunk(
     raw: &serde_json::Value,
     evt: wire::CreateChatCompletionStreamResponse,
     out: &mut Vec<Result<ProviderChunk, ProviderError>>,
+    usage_parser: UsageParser,
 ) {
     // poll_next 用 `pop()` 取，按时间顺序吐就要反序压栈。
     let mut buf: Vec<Result<ProviderChunk, ProviderError>> = Vec::new();
@@ -767,7 +794,10 @@ fn handle_chunk(
 
     // 末尾 usage chunk：choices 为空、usage 有值。
     if let Some(usage) = &evt.usage {
-        buf.push(Ok(ProviderChunk::Usage(usage_from_wire(usage))));
+        buf.push(Ok(ProviderChunk::Usage(usage_parser(
+            raw.get("usage"),
+            usage,
+        ))));
     }
 
     buf.reverse();
@@ -831,7 +861,7 @@ fn stop_reason_from_wire(
     }
 }
 
-fn usage_from_wire(u: &wire::CompletionUsage) -> Usage {
+fn usage_from_wire(_raw_usage: Option<&serde_json::Value>, u: &wire::CompletionUsage) -> Usage {
     Usage {
         input_tokens: u64::try_from(u.prompt_tokens).ok(),
         output_tokens: u64::try_from(u.completion_tokens).ok(),

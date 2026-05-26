@@ -5,7 +5,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::{
@@ -13,6 +13,7 @@ use agent_client_protocol::schema::{
     ToolKind,
 };
 use defect_agent::error::BoxError;
+use defect_agent::shell::{ShellBackend, ShellError, TerminalExitStatus, TerminalId};
 use defect_agent::tool::{
     SafetyClass, Tool, ToolCallDescription, ToolContext, ToolError, ToolEvent, ToolSchema,
     ToolStream,
@@ -22,12 +23,9 @@ use futures::future::BoxFuture;
 use futures::stream;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_TIMEOUT_MS: u64 = 600_000;
-const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const TITLE_TRUNC: usize = 80;
 
 /// v0 内置 bash 工具。无内部状态——单例 `Arc::new(BashTool::new())` 即可。
@@ -154,21 +152,24 @@ impl Tool for BashTool {
     fn execute(&self, args: serde_json::Value, ctx: ToolContext<'_>) -> ToolStream {
         let cwd = ctx.cwd.to_path_buf();
         let cancel = ctx.cancel.clone();
+        let shell = ctx.shell.clone();
         let default_timeout_ms = self.default_timeout_ms;
         let max_timeout_ms = self.max_timeout_ms;
-        let fut =
-            async move { run_bash(args, cwd, cancel, default_timeout_ms, max_timeout_ms).await };
+        let fut = async move {
+            run_bash(args, cwd, cancel, shell, default_timeout_ms, max_timeout_ms).await
+        };
         let s: Pin<Box<dyn futures::Stream<Item = ToolEvent> + Send>> = Box::pin(stream::once(fut));
         s
     }
 }
 
-/// 一次完整的 bash 调用：解析 args、resolve workdir、spawn、捕获、终态。
-/// 返回单一 [`ToolEvent`]——`Completed` 或 `Failed`。
+/// 一次完整的 bash 调用：解析 args、resolve workdir、走 [`ShellBackend`]、
+/// 装配最终输出。返回单一 [`ToolEvent`]——`Completed` 或 `Failed`。
 async fn run_bash(
     args: serde_json::Value,
     session_cwd: PathBuf,
     cancel: tokio_util::sync::CancellationToken,
+    shell: Arc<dyn ShellBackend>,
     default_timeout_ms: u64,
     max_timeout_ms: u64,
 ) -> ToolEvent {
@@ -195,103 +196,112 @@ async fn run_bash(
 
     let started = std::time::Instant::now();
 
-    let mut cmd = build_command(&parsed.command);
-    cmd.current_dir(&workdir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let terminal_id = match shell.create(parsed.command.clone(), workdir).await {
+        Ok(id) => id,
+        Err(err) => return ToolEvent::Failed(ToolError::Execution(BoxError::new(err))),
+    };
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
+    let result = run_command(shell.clone(), &terminal_id, &cancel, timeout, started).await;
+    // release 在所有出口幂等触发——backend 保证重复 release 同一个 id 不报错。
+    let _ = shell.release(&terminal_id).await;
+    result
+}
+
+async fn run_command(
+    shell: Arc<dyn ShellBackend>,
+    terminal_id: &TerminalId,
+    cancel: &tokio_util::sync::CancellationToken,
+    timeout: u64,
+    started: std::time::Instant,
+) -> ToolEvent {
+    let mut timed_out = false;
+    let mut canceled = false;
+
+    let timeout_at = tokio::time::sleep(Duration::from_millis(timeout));
+    tokio::pin!(timeout_at);
+
+    // wait_fut 必须能"在 cancel 出口活下去"。ACP 反向请求一旦发出，response
+    // 必须能交付给在世的 oneshot::Receiver；若我们 drop wait_fut，server 把
+    // "无人接收"映射成 internal_error 并撕掉整条连接（详见
+    // `agent_client_protocol::jsonrpc::incoming_actor::dispatch_dispatch` 里
+    // `router.respond_with_result(result)?`）。
+    //
+    // 做法：把 wait_fut 装成 `'static` 的 self-owning future（闭包持 Arc<shell>
+    // 与 id），cancel 分支用 [`tokio::spawn`] 把它 detach 走继续 drain 响应；
+    // timeout 分支保留"先 kill 再 drain"语义，此时同一个 fut 直接 await 即可。
+    let mut wait_fut: Pin<
+        Box<dyn futures::Future<Output = Result<TerminalExitStatus, ShellError>> + Send>,
+    > = {
+        let shell = shell.clone();
+        let id = terminal_id.clone();
+        Box::pin(async move { shell.wait_for_exit(&id).await })
+    };
+
+    let exit_status = tokio::select! {
+        biased;
+
+        _ = cancel.cancelled() => {
+            canceled = true;
+            None
+        }
+
+        _ = &mut timeout_at => {
+            timed_out = true;
+            None
+        }
+
+        result = &mut wait_fut => {
+            match result {
+                Ok(status) => Some(status),
+                Err(err) => {
+                    return ToolEvent::Failed(ToolError::Execution(BoxError::new(err)));
+                }
+            }
+        }
+    };
+
+    if canceled {
+        // 先发 kill 让进程尽快收尾；wait_fut 不能 drop（reverse-request 路径
+        // 的 oneshot 必须有人接），detach 出去 await，让运行时在响应到达时
+        // 仍有活的 receiver。LocalShellBackend 的 future 是 in-process 通知，
+        // detach 也无副作用。
+        let _ = shell.kill(terminal_id).await;
+        tokio::spawn(async move {
+            let _ = wait_fut.await;
+        });
+        return ToolEvent::Failed(ToolError::Canceled);
+    }
+
+    // 超时路径：先 kill，再 wait_for_exit + output 拿最终输出。
+    let exit_status = match exit_status {
+        Some(status) => Some(status),
+        None => {
+            let _ = shell.kill(terminal_id).await;
+            wait_fut.await.ok()
+        }
+    };
+
+    let output = match shell.output(terminal_id).await {
+        Ok(o) => o,
         Err(err) => {
             return ToolEvent::Failed(ToolError::Execution(BoxError::new(err)));
         }
     };
 
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
-    let mut stdout_lines = BufReader::new(stdout).lines();
-    let mut stderr_lines = BufReader::new(stderr).lines();
-
-    let mut buf = OutputBuffer::new();
-    let mut stdout_open = true;
-    let mut stderr_open = true;
-    let mut timed_out = false;
-    let mut canceled = false;
-    let mut wait_status: Option<std::process::ExitStatus> = None;
-
-    let timeout_at = tokio::time::sleep(Duration::from_millis(timeout));
-    tokio::pin!(timeout_at);
-
-    loop {
-        tokio::select! {
-            biased;
-
-            _ = cancel.cancelled() => {
-                canceled = true;
-                break;
-            }
-
-            _ = &mut timeout_at, if !timed_out => {
-                timed_out = true;
-                // child drop = SIGKILL via kill_on_drop. We fall through to break
-                // after explicitly killing for deterministic behavior.
-                let _ = child.start_kill();
-                break;
-            }
-
-            line = stdout_lines.next_line(), if stdout_open => {
-                match line {
-                    Ok(Some(mut l)) => {
-                        l.push('\n');
-                        buf.push(l.as_bytes());
-                    }
-                    Ok(None) => stdout_open = false,
-                    Err(_) => stdout_open = false,
-                }
-            }
-
-            line = stderr_lines.next_line(), if stderr_open => {
-                match line {
-                    Ok(Some(mut l)) => {
-                        l.push('\n');
-                        buf.push(l.as_bytes());
-                    }
-                    Ok(None) => stderr_open = false,
-                    Err(_) => stderr_open = false,
-                }
-            }
-
-            status = child.wait(), if !stdout_open && !stderr_open => {
-                wait_status = status.ok();
-                break;
-            }
-        }
-    }
-
-    if canceled {
-        return ToolEvent::Failed(ToolError::Canceled);
-    }
-
-    // 取消 / 超时 / 流提前关闭都可能在这里 child 还没 wait——补一下。
-    if wait_status.is_none() {
-        wait_status = child.wait().await.ok();
-    }
-
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
 
-    let (exit_code, signal_name) = decode_status(wait_status.as_ref());
+    let (exit_code, signal_name) = match exit_status.as_ref() {
+        Some(s) => (s.exit_code, s.signal.clone()),
+        None => (None, None),
+    };
 
-    let mut text = String::from_utf8_lossy(buf.as_bytes()).into_owned();
-    if buf.truncated() > 0 {
+    let mut text = output.text;
+    let truncated_bytes: u64 = if output.truncated { 1 } else { 0 };
+    if output.truncated {
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
-        text.push_str(&format!(
-            "[output truncated; {} bytes dropped]",
-            buf.truncated()
-        ));
+        text.push_str("[output truncated]");
     }
     if timed_out {
         if !text.is_empty() && !text.ends_with('\n') {
@@ -316,7 +326,7 @@ async fn run_bash(
         exit_code,
         signal: signal_name,
         timed_out,
-        truncated_bytes: buf.truncated(),
+        truncated_bytes,
         duration_ms,
     })
     .unwrap_or(serde_json::Value::Null);
@@ -327,20 +337,6 @@ async fn run_bash(
     ))]);
     fields.raw_output = Some(raw_output);
     ToolEvent::Completed(fields)
-}
-
-#[cfg(unix)]
-fn build_command(command: &str) -> Command {
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c").arg(command);
-    cmd
-}
-
-#[cfg(windows)]
-fn build_command(command: &str) -> Command {
-    let mut cmd = Command::new("cmd");
-    cmd.arg("/C").arg(command);
-    cmd
 }
 
 /// Canonicalize 工作目录并校验它在 session cwd 子树内。
@@ -376,91 +372,12 @@ fn resolve_workdir(session_cwd: &Path, requested: Option<&str>) -> Result<PathBu
     Ok(canon_target)
 }
 
-/// 1 MiB 上限的 append-only buffer。超额字节 drop 但记入 `truncated`。
-struct OutputBuffer {
-    bytes: Vec<u8>,
-    truncated: u64,
-}
-
-impl OutputBuffer {
-    fn new() -> Self {
-        Self {
-            bytes: Vec::new(),
-            truncated: 0,
-        }
-    }
-
-    fn push(&mut self, chunk: &[u8]) {
-        let remaining = MAX_OUTPUT_BYTES.saturating_sub(self.bytes.len());
-        if remaining == 0 {
-            self.truncated += chunk.len() as u64;
-            return;
-        }
-        if chunk.len() <= remaining {
-            self.bytes.extend_from_slice(chunk);
-        } else {
-            self.bytes
-                .extend_from_slice(chunk.get(..remaining).unwrap_or(chunk));
-            self.truncated += (chunk.len() - remaining) as u64;
-        }
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    fn truncated(&self) -> u64 {
-        self.truncated
-    }
-}
-
 fn truncate_title(s: &str) -> String {
     if s.chars().count() <= TITLE_TRUNC {
         return s.to_string();
     }
     let truncated: String = s.chars().take(TITLE_TRUNC).collect();
     format!("{truncated}…")
-}
-
-#[cfg(unix)]
-fn decode_status(status: Option<&std::process::ExitStatus>) -> (Option<i32>, Option<String>) {
-    use std::os::unix::process::ExitStatusExt;
-    match status {
-        None => (None, None),
-        Some(s) => {
-            if let Some(code) = s.code() {
-                (Some(code), None)
-            } else if let Some(sig) = s.signal() {
-                (None, Some(signal_name(sig)))
-            } else {
-                (None, None)
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-fn decode_status(status: Option<&std::process::ExitStatus>) -> (Option<i32>, Option<String>) {
-    match status {
-        None => (None, None),
-        Some(s) => (s.code(), None),
-    }
-}
-
-#[cfg(unix)]
-fn signal_name(sig: i32) -> String {
-    // 保守的内置映射——常见的几个；其余给 SIG#N。
-    match sig {
-        1 => "SIGHUP".into(),
-        2 => "SIGINT".into(),
-        3 => "SIGQUIT".into(),
-        6 => "SIGABRT".into(),
-        9 => "SIGKILL".into(),
-        13 => "SIGPIPE".into(),
-        14 => "SIGALRM".into(),
-        15 => "SIGTERM".into(),
-        other => format!("SIG#{other}"),
-    }
 }
 
 #[cfg(test)]

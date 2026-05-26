@@ -4,4 +4,5 @@
 //! 对应一个 [`defect_agent::llm::ProtocolId`]。
 
 pub mod anthropic_messages;
+pub mod deepseek_chat;
 pub mod openai_chat;

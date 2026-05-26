@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::{ContentBlock, ToolCallContent};
 use defect_agent::fs::FsBackend;
+use defect_agent::shell::ShellBackend;
 use defect_agent::tool::{SafetyClass, Tool, ToolContext, ToolError, ToolEvent};
 use defect_config::BashToolConfig;
 use futures::StreamExt;
@@ -14,6 +15,7 @@ use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 use crate::fs::LocalFsBackend;
+use crate::shell::LocalShellBackend;
 
 use super::BashTool;
 
@@ -24,7 +26,8 @@ async fn drive(stream: defect_agent::tool::ToolStream) -> Vec<ToolEvent> {
 
 fn ctx_with(cwd: &std::path::Path, cancel: CancellationToken) -> ToolContext<'_> {
     let fs: Arc<dyn FsBackend> = Arc::new(LocalFsBackend::new(cwd.to_path_buf()));
-    ToolContext::new(cwd, cancel, fs)
+    let shell: Arc<dyn ShellBackend> = Arc::new(LocalShellBackend::new());
+    ToolContext::new(cwd, cancel, fs, shell)
 }
 
 fn extract_text(event: &ToolEvent) -> String {

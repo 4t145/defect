@@ -16,4 +16,5 @@ pub mod fs;
 pub mod llm;
 pub mod policy;
 pub mod session;
+pub mod shell;
 pub mod tool;

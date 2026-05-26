@@ -7,6 +7,8 @@
 
 pub mod bash;
 pub mod fs;
+pub mod shell;
 
 pub use bash::BashTool;
 pub use fs::{EditFileTool, LocalFsBackend, ReadFileTool, WriteFileTool};
+pub use shell::LocalShellBackend;

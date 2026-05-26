@@ -23,6 +23,7 @@ use crate::error::BoxError;
 use crate::event::{AgentEvent, PermissionResolution};
 use crate::fs::FsBackend;
 use crate::llm::{Message, ModelInfo, ProviderError, ProviderInfo};
+use crate::shell::ShellBackend;
 use crate::tool::{Tool, ToolSchema};
 
 mod default;
@@ -66,17 +67,23 @@ pub trait AgentCore: Send + Sync {
     /// [`FileSystemCapabilities`] 选择 `LocalFsBackend` 或 `AcpFsBackend`。
     /// session 持有它的 `Arc`，所有 fs 工具调用都走它。
     ///
+    /// `shell` 是 session 级 shell 后端——`defect-acp` 装配时按客户端的
+    /// [`ClientCapabilities::terminal`] 选择 `LocalShellBackend` 或
+    /// `AcpShellBackend`。session 持有它的 `Arc`，`bash` 工具调用都走它。
+    ///
     /// # Errors
     ///
     /// MCP 启动失败、cwd 不存在、id 重复等。
     ///
     /// [`FileSystemCapabilities`]: agent_client_protocol::schema::FileSystemCapabilities
+    /// [`ClientCapabilities::terminal`]: agent_client_protocol::schema::ClientCapabilities
     fn create_session(
         &self,
         id: SessionId,
         cwd: PathBuf,
         mcp_servers: Vec<McpServer>,
         fs: Arc<dyn FsBackend>,
+        shell: Arc<dyn ShellBackend>,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
 
     /// 从持久化状态恢复一个已存在的 session。
@@ -88,6 +95,7 @@ pub trait AgentCore: Send + Sync {
         &self,
         id: SessionId,
         fs: Arc<dyn FsBackend>,
+        shell: Arc<dyn ShellBackend>,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
 
     /// 按 id 查找已存在的 session。

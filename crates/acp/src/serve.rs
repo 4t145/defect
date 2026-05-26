@@ -20,12 +20,14 @@ use defect_agent::event::{AgentEvent, PermissionResolution};
 use defect_agent::fs::FsBackend;
 use defect_agent::llm::{ModelInfo, ProviderError, ProviderInfo};
 use defect_agent::session::{AgentCore, AgentError, Session, TurnError, uuid_like};
-use defect_tools::LocalFsBackend;
+use defect_agent::shell::ShellBackend;
+use defect_tools::{LocalFsBackend, LocalShellBackend};
 use futures::StreamExt;
 use serde_json::json;
 
 use crate::fs::AcpFsBackend;
 use crate::project::{PermissionAsk, Projection, project};
+use crate::shell::AcpShellBackend;
 
 /// 客户端 fs 能力协商结果（连接级）。
 ///
@@ -45,6 +47,27 @@ fn decide_fs_mode(client_caps: &ClientCapabilities) -> FsMode {
         FsMode::Delegated
     } else {
         FsMode::Local
+    }
+}
+
+/// 客户端 terminal 能力协商结果（连接级）。
+///
+/// `initialize` handler 读 [`ClientCapabilities::terminal`] 后写入，
+/// `session/new` / `session/load` 据此选 [`AcpShellBackend`] /
+/// [`LocalShellBackend`]。设计详见 `docs/inbound/acp-shell.md` §1。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellMode {
+    /// 客户端声明完整 `terminal/*` 支持：完全委托。
+    Delegated,
+    /// 字段为 false 或缺失：整组退回本地（不混用，§1.2 决策表）。
+    Local,
+}
+
+fn decide_shell_mode(client_caps: &ClientCapabilities) -> ShellMode {
+    if client_caps.terminal {
+        ShellMode::Delegated
+    } else {
+        ShellMode::Local
     }
 }
 
@@ -295,15 +318,17 @@ fn provider_model_description(
 
 /// 连接级共享状态。`serve_on` 给每个 handler 克隆一份 `Arc<ServeState>`。
 ///
-/// `agent` 是注入的核心，连接生命周期内只读。`fs_mode` 由 `initialize` 写入、
-/// 后续 `session/new` 与 `session/load` 读取——RwLock 在读多写少的前提下保护
-/// 这一次握手结果。
+/// `agent` 是注入的核心，连接生命周期内只读。`fs_mode` / `shell_mode` 由
+/// `initialize` 写入、后续 `session/new` 与 `session/load` 读取——RwLock 在
+/// 读多写少的前提下保护这一次握手结果。
 struct ServeState {
     agent: Arc<dyn AgentCore>,
     /// 客户端按 ACP 规范应当先 initialize 再 session/new。Default = `Local`
     /// 是回归保守值——initialize 还没到时就 session/new 是协议违规，但即便如此
     /// 我们也宁可走本地盘也不裸调反向请求。
     fs_mode: RwLock<FsMode>,
+    /// shell 后端选择。Default = `Local`——同 [`Self::fs_mode`] 取保守降级。
+    shell_mode: RwLock<ShellMode>,
 }
 
 impl ServeState {
@@ -311,11 +336,19 @@ impl ServeState {
         Self {
             agent,
             fs_mode: RwLock::new(FsMode::Local),
+            shell_mode: RwLock::new(ShellMode::Local),
         }
     }
 
     fn current_fs_mode(&self) -> FsMode {
         self.fs_mode.read().map(|g| *g).unwrap_or(FsMode::Local)
+    }
+
+    fn current_shell_mode(&self) -> ShellMode {
+        self.shell_mode
+            .read()
+            .map(|g| *g)
+            .unwrap_or(ShellMode::Local)
     }
 
     /// 在 connection 级 fs_mode 与 session 级 cwd 之间组装 fs 后端。
@@ -335,19 +368,41 @@ impl ServeState {
         }
     }
 
+    /// 在 connection 级 shell_mode 与 session 级 cwd 之间组装 shell 后端。
+    fn shell_backend(
+        &self,
+        cx: &ConnectionTo<Client>,
+        session_id: &SessionId,
+        cwd: &std::path::Path,
+    ) -> Arc<dyn ShellBackend> {
+        match self.current_shell_mode() {
+            ShellMode::Delegated => Arc::new(AcpShellBackend::new(
+                cx.clone(),
+                session_id.clone(),
+                cwd.to_path_buf(),
+            )),
+            ShellMode::Local => Arc::new(LocalShellBackend::new()),
+        }
+    }
+
     async fn on_initialize(
         &self,
         req: InitializeRequest,
         responder: agent_client_protocol::Responder<InitializeResponse>,
     ) -> Result<(), agent_client_protocol::Error> {
-        let mode = decide_fs_mode(&req.client_capabilities);
+        let fs_mode = decide_fs_mode(&req.client_capabilities);
+        let shell_mode = decide_shell_mode(&req.client_capabilities);
         tracing::debug!(
             version = ?req.protocol_version,
-            fs_mode = ?mode,
+            fs_mode = ?fs_mode,
+            shell_mode = ?shell_mode,
             "initialize"
         );
         if let Ok(mut guard) = self.fs_mode.write() {
-            *guard = mode;
+            *guard = fs_mode;
+        }
+        if let Ok(mut guard) = self.shell_mode.write() {
+            *guard = shell_mode;
         }
         responder.respond(
             InitializeResponse::new(req.protocol_version)
@@ -374,9 +429,10 @@ impl ServeState {
         let cwd_for_log = req.cwd.clone();
         let session_id = SessionId::new(uuid_like());
         let fs = self.fs_backend(&cx, &session_id, &req.cwd);
+        let shell = self.shell_backend(&cx, &session_id, &req.cwd);
         match self
             .agent
-            .create_session(session_id, req.cwd, req.mcp_servers, fs)
+            .create_session(session_id, req.cwd, req.mcp_servers, fs, shell)
             .await
         {
             Ok(session) => {
@@ -405,7 +461,8 @@ impl ServeState {
         let session_id = req.session_id.clone();
         let cwd_for_log = req.cwd.clone();
         let fs = self.fs_backend(&cx, &session_id, &req.cwd);
-        match self.agent.load_session(session_id, fs).await {
+        let shell = self.shell_backend(&cx, &session_id, &req.cwd);
+        match self.agent.load_session(session_id, fs, shell).await {
             Ok(session) => {
                 let models = session_model_state(session.as_ref()).await;
                 tracing::info!(

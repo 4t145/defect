@@ -21,6 +21,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
 use toac::body::Body;
+use toac::body::codec::sse::SseEventStream;
 use toac::{ApiClient, CallError, MakeRequest, Operation, Request as ToacRequest};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -260,79 +261,9 @@ impl LlmProvider for OpenAiProvider {
         cancel: CancellationToken,
     ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
         async move {
-            let echo_mode = self.thinking_echo_for_model(&req.model);
-            let body = openai_chat::encode_request_with_echo(&req, echo_mode);
-            let op = self
-                .with_openai_headers(chat_completions::post::Request { body })
-                .with_accept(HeaderValue::from_static("text/event-stream"));
-
-            let mut client = self.client.clone();
-            let resp = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => {
-                    return Err(ProviderError::new(ProviderErrorKind::Canceled));
-                }
-                r = client.call(op) => r.map_err(call_error_to_provider)?,
-            };
-            let request_id = extract_request_id(&resp.headers);
-            let retry_after = extract_retry_after(&resp.headers);
-
-            let stream = match resp.body {
-                chat_completions::post::ResponseBody::Status200Sse(s) => s,
-                chat_completions::post::ResponseBody::Status200Json(_) => {
-                    return Err(ProviderError::new(ProviderErrorKind::ProtocolViolation {
-                        hint: "server returned application/json despite Accept: text/event-stream"
-                            .into(),
-                    })
-                    .with_request_id_opt(request_id));
-                }
-                chat_completions::post::ResponseBody::Status400(e) => {
-                    return Err(
-                        error_response(400, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status401(e) => {
-                    return Err(
-                        error_response(401, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status403(e) => {
-                    return Err(
-                        error_response(403, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status404(e) => {
-                    return Err(
-                        error_response(404, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status413(e) => {
-                    return Err(
-                        error_response(413, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status429(e) => {
-                    return Err(
-                        error_response(429, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status500(e) => {
-                    return Err(
-                        error_response(500, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status502(e) => {
-                    return Err(
-                        error_response(502, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-                chat_completions::post::ResponseBody::Status503(e) => {
-                    return Err(
-                        error_response(503, &e, retry_after).with_request_id_opt(request_id)
-                    );
-                }
-            };
-
+            let stream = self
+                .start_chat_completion_stream(req, cancel.clone())
+                .await?;
             let decoded = openai_chat::decode_stream(stream, cancel);
             Ok(Box::pin(decoded) as ProviderStream)
         }
@@ -356,6 +287,73 @@ impl OpenAiProvider {
         self.model_info(model_id)
             .and_then(|m| m.capabilities_overrides.thinking_echo)
             .unwrap_or(self.capabilities.thinking_echo)
+    }
+
+    /// 发送一个 Chat Completions SSE 请求，并返回原始事件流。
+    ///
+    /// # Errors
+    ///
+    /// 当请求被取消、transport 失败、服务端返回非 200 SSE、或返回已知
+    /// OpenAI 错误体时返回错误。
+    pub(crate) async fn start_chat_completion_stream(
+        &self,
+        req: CompletionRequest,
+        cancel: CancellationToken,
+    ) -> Result<SseEventStream, ProviderError> {
+        let echo_mode = self.thinking_echo_for_model(&req.model);
+        let body = openai_chat::encode_request_with_echo(&req, echo_mode);
+        let op = self
+            .with_openai_headers(chat_completions::post::Request { body })
+            .with_accept(HeaderValue::from_static("text/event-stream"));
+
+        let mut client = self.client.clone();
+        let resp = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                return Err(ProviderError::new(ProviderErrorKind::Canceled));
+            }
+            r = client.call(op) => r.map_err(call_error_to_provider)?,
+        };
+        let request_id = extract_request_id(&resp.headers);
+        let retry_after = extract_retry_after(&resp.headers);
+
+        match resp.body {
+            chat_completions::post::ResponseBody::Status200Sse(s) => Ok(s),
+            chat_completions::post::ResponseBody::Status200Json(_) => {
+                Err(ProviderError::new(ProviderErrorKind::ProtocolViolation {
+                    hint: "server returned application/json despite Accept: text/event-stream"
+                        .into(),
+                })
+                .with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status400(e) => {
+                Err(error_response(400, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status401(e) => {
+                Err(error_response(401, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status403(e) => {
+                Err(error_response(403, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status404(e) => {
+                Err(error_response(404, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status413(e) => {
+                Err(error_response(413, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status429(e) => {
+                Err(error_response(429, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status500(e) => {
+                Err(error_response(500, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status502(e) => {
+                Err(error_response(502, &e, retry_after).with_request_id_opt(request_id))
+            }
+            chat_completions::post::ResponseBody::Status503(e) => {
+                Err(error_response(503, &e, retry_after).with_request_id_opt(request_id))
+            }
+        }
     }
 }
 

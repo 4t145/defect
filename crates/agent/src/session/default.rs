@@ -49,6 +49,7 @@ use crate::session::{
     AgentCore, AgentError, EventStream, History, Session, SessionCreateInfo, SessionLoader,
     SessionObserver, SessionToolFactory, ToolRegistry, TurnError, VecHistory,
 };
+use crate::shell::ShellBackend;
 
 /// 默认 [`AgentCore`]。
 pub struct DefaultAgentCore {
@@ -142,6 +143,7 @@ impl AgentCore for DefaultAgentCore {
         cwd: PathBuf,
         mcp_servers: Vec<McpServer>,
         fs: Arc<dyn FsBackend>,
+        shell: Arc<dyn ShellBackend>,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>> {
         Box::pin(async move {
             if !cwd.is_absolute() || !cwd.exists() {
@@ -184,6 +186,7 @@ impl AgentCore for DefaultAgentCore {
                         .clone(),
                 ),
                 fs,
+                shell,
             }) as Arc<dyn Session>;
 
             let session_info = SessionCreateInfo {
@@ -206,6 +209,7 @@ impl AgentCore for DefaultAgentCore {
         &self,
         id: SessionId,
         fs: Arc<dyn FsBackend>,
+        shell: Arc<dyn ShellBackend>,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>> {
         Box::pin(async move {
             if let Some(existing) = self.sessions.get(&id) {
@@ -248,6 +252,7 @@ impl AgentCore for DefaultAgentCore {
                         .clone(),
                 ),
                 fs,
+                shell,
             }) as Arc<dyn Session>;
 
             self.sessions.insert(id, session.clone());
@@ -276,6 +281,9 @@ pub struct DefaultSession {
     /// session 级 fs 后端。由 [`AgentCore::create_session`] 注入；
     /// `TurnRunner` 把 `&dyn FsBackend` 借到 [`crate::tool::ToolContext`] 传给工具。
     fs: Arc<dyn FsBackend>,
+    /// session 级 shell 后端。与 `fs` 同款由 [`AgentCore::create_session`] 注入；
+    /// `bash` 工具通过 [`crate::tool::ToolContext`] 拿它。
+    shell: Arc<dyn ShellBackend>,
 }
 
 impl DefaultSession {}
@@ -449,6 +457,7 @@ impl Session for DefaultSession {
                     system_prompt,
                     cwd: &self.cwd,
                     fs: self.fs.clone(),
+                    shell: self.shell.clone(),
                 };
 
                 runner.run(prompt).await

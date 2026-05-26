@@ -51,7 +51,7 @@
 | inbound  | ACP Content 兼容性补全（Image / Resource / EmbeddedResource 等） | `docs/inbound/acp-prompt.md`                                            | P1     | ✅ 已完成 |
 | inbound  | ACP 权限请求桥（requestPermission）                            | `docs/inbound/acp-permission.md`                                        | P0     | ✅ 已完成 |
 | inbound  | ACP 文件系统委托（通过客户端读写）                             | `docs/inbound/acp-fs.md`                                                | P1     | ✅ 已完成 |
-| inbound  | ACP shell 委托（通过客户端跑终端命令）                         | `docs/inbound/acp-shell.md`                                             | P2     | 🕒 未开始 |
+| inbound  | ACP shell 委托（通过客户端跑终端命令）                         | `docs/inbound/acp-shell.md`                                             | P2     | ✅ 已完成 |
 | inbound  | ACP 取消/中断（cancel turn 边界 case）                         | `docs/inbound/acp-cancel.md`                                            | P1     | ✅ 已完成 |
 | inbound  | ACP 暴露 session 模型候选并支持 `session/set_model`            | `docs/inbound/acp-session.md`                                           | P1     | 🚧 进行中 |
 | 基础     | CLI 入口（参数解析、组装、跑 ACP server）                      | `docs/cli.md`                                                           | P0     | ✅ 已完成 |

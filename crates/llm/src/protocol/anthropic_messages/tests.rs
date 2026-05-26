@@ -226,7 +226,7 @@ fn encode_request_tool_uses_and_results() {
         Some(wire::ToolChoice::ToolChoiceTool(ref t)) if t.name == "fs_read"
     ));
 
-    let tools = w.tools.expect("tools");
+    let tools = w.tools.as_ref().expect("tools");
     assert_eq!(tools.len(), 1);
     let wire::ToolUnion::Tool(t) = &tools[0] else {
         panic!("expected Tool");
@@ -262,7 +262,6 @@ fn encode_request_tool_uses_and_results() {
     assert_eq!(tr.tool_use_id, "toolu_1");
     assert_eq!(tr.is_error, Some(false));
 
-    let tools = w.tools.expect("tools");
     let wire::ToolUnion::Tool(tool) = &tools[0] else {
         panic!("expected Tool");
     };

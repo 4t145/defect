@@ -26,6 +26,7 @@ use defect_agent::session::{
     AgentCore, DefaultAgentCore, LoadedSession, Session, SessionCreateInfo, SessionLoader,
     StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
 };
+use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{
     SafetyClass, Tool, ToolCallDescription, ToolContext, ToolEvent, ToolSchema, ToolStream,
 };
@@ -248,6 +249,7 @@ async fn full_turn_with_one_tool_call() {
             cwd,
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("create session");
@@ -353,6 +355,7 @@ async fn second_run_turn_while_first_in_flight_returns_in_progress() {
             cwd,
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("session");
@@ -412,6 +415,7 @@ async fn load_session_restores_history_for_next_turn() {
         .load_session(
             loaded.info.id.clone(),
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("load session");
@@ -498,6 +502,7 @@ async fn ask_writes_policy_runs_after_allow_once() {
             cwd,
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("create session");
@@ -596,6 +601,7 @@ async fn ask_writes_policy_cancel_during_ask_returns_cancelled() {
             cwd,
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("session");
@@ -689,6 +695,7 @@ async fn deny_during_ask_completes_cleanly() {
             cwd,
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
         )
         .await
         .expect("session");

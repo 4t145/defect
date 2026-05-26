@@ -52,7 +52,7 @@ fn run_state_machine(datas: &[&str]) -> (DecoderState, Vec<Result<ProviderChunk,
     let mut out = Vec::new();
     for sse in make_sse_events(datas) {
         let mut buf = Vec::new();
-        process_sse(&mut state, sse, &mut buf);
+        process_sse(&mut state, sse, &mut buf, usage_from_wire);
         // process_sse 内部反序压栈给 poll_next 的 pop()——测试要按时间序，
         // 这里再反一次。
         buf.reverse();

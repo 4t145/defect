@@ -192,6 +192,8 @@ struct ToolCallSlot {
 
 `Capabilities` 的 `thinking` 字段对 OpenAI 默认报 `Unsupported`、`thinking_echo` 默认 `Forbidden`；DeepSeek base_url 时通过 `OpenAiConfig` 在构造时传入 `Capabilities` 覆盖（`thinking: Supported`），并按模型在 `HARDCODED_MODELS` 里设 `ModelCapabilityOverrides::thinking_echo`——`deepseek-v4-flash` / `deepseek-v4-pro` → `Required`。这层覆盖在构造期发生，不影响每请求判定。
 
+DeepSeek prompt cache / smoke 的排障经验另见 [`../testing/deepseek-cache-smoke.md`](../testing/deepseek-cache-smoke.md)。
+
 ## 6. 错误映射差异
 
 整体结构同 [`llm-anthropic.md`](./llm-anthropic.md) §7，OpenAI 特有的：

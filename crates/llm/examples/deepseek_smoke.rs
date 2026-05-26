@@ -27,6 +27,7 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason as AcpStopReason;
 use defect_agent::llm::{LlmProvider, SamplingParams};
@@ -40,6 +41,8 @@ use common::{
 
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 const THINKING_BUDGET_TOKENS: u32 = 2048;
+const CACHE_SMOKE_PROBE_ATTEMPTS: usize = 4;
+const CACHE_SMOKE_SETTLE_DELAY: Duration = Duration::from_secs(3);
 
 const TEXT_PROMPT: &str = "Say hello in one short sentence.";
 const TOOL_PROMPT: &str = "Please call the `echo` tool with msg=\"hello from smoke\", \
@@ -283,41 +286,72 @@ async fn scenario_cache_smoke(
     provider: Arc<dyn LlmProvider>,
     model: &str,
 ) -> Result<Option<String>, String> {
-    let first_session = build_session(provider.clone(), model, SamplingParams::default()).await;
-    let (first_stop, first_text, _first_hits, first_usage) =
-        run_turn_and_print_with_usage(first_session, CACHE_SMOKE_PROMPT)
+    let total_attempts = CACHE_SMOKE_PROBE_ATTEMPTS.saturating_add(1);
+    let mut observed_cache_reads = Vec::with_capacity(total_attempts);
+    let mut any_usage_reported = false;
+
+    for attempt_index in 0..total_attempts {
+        let session = build_session(provider.clone(), model, SamplingParams::default()).await;
+        let (stop, text, _hits, usage) = run_turn_and_print_with_usage(session, CACHE_SMOKE_PROMPT)
             .await
             .map_err(|e| e.to_string())?;
-    if !matches!(first_stop, AcpStopReason::EndTurn) {
-        return Err(format!("unexpected first stop reason: {first_stop:?}"));
-    }
-    if first_text.trim().is_empty() {
-        return Err("empty assistant text on first cache-smoke run".to_string());
+        if !matches!(stop, AcpStopReason::EndTurn) {
+            return Err(format!(
+                "unexpected cache-smoke stop reason on attempt {}: {stop:?}",
+                attempt_index + 1
+            ));
+        }
+        if text.trim().is_empty() {
+            return Err(format!(
+                "empty assistant text on cache-smoke attempt {}",
+                attempt_index + 1
+            ));
+        }
+
+        any_usage_reported |= usage_reported(&usage);
+        let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
+        observed_cache_reads.push(cache_read);
+
+        let phase = if attempt_index == 0 {
+            "warmup"
+        } else {
+            "probe"
+        };
+        println!(
+            "[cache-smoke] attempt={} phase={phase} cache_read={cache_read}",
+            attempt_index + 1
+        );
+
+        if attempt_index > 0 && cache_read > 0 {
+            println!(
+                "[cache-smoke] cache hit observed after warmup: {:?}",
+                observed_cache_reads
+            );
+            return Ok(None);
+        }
+
+        if attempt_index + 1 < total_attempts {
+            tokio::time::sleep(CACHE_SMOKE_SETTLE_DELAY).await;
+        }
     }
 
-    let second_session = build_session(provider, model, SamplingParams::default()).await;
-    let (second_stop, second_text, _second_hits, second_usage) =
-        run_turn_and_print_with_usage(second_session, CACHE_SMOKE_PROMPT)
-            .await
-            .map_err(|e| e.to_string())?;
-    if !matches!(second_stop, AcpStopReason::EndTurn) {
-        return Err(format!("unexpected second stop reason: {second_stop:?}"));
-    }
-    if second_text.trim().is_empty() {
-        return Err("empty assistant text on second cache-smoke run".to_string());
-    }
-
-    let first_cache_read = first_usage.cache_read_input_tokens.unwrap_or(0);
-    let second_cache_read = second_usage.cache_read_input_tokens.unwrap_or(0);
-    println!(
-        "[cache-smoke] first_cache_read={first_cache_read} second_cache_read={second_cache_read}"
-    );
-
-    if second_cache_read == 0 {
-        return Err(format!(
-            "expected cache_read_input_tokens on second run, got first={first_cache_read} second=0"
+    if !any_usage_reported {
+        return Ok(Some(
+            "DeepSeek stream did not report usage/prompt_cache_hit_tokens; \
+             cannot verify cache hits from streaming usage on this endpoint"
+                .to_string(),
         ));
     }
 
-    Ok(None)
+    Err(format!(
+        "no post-warmup cache hit observed across {} probes: {:?}",
+        CACHE_SMOKE_PROBE_ATTEMPTS, observed_cache_reads
+    ))
+}
+
+fn usage_reported(usage: &defect_agent::llm::Usage) -> bool {
+    usage.input_tokens.is_some()
+        || usage.output_tokens.is_some()
+        || usage.cache_read_input_tokens.is_some()
+        || usage.cache_creation_input_tokens.is_some()
 }

@@ -22,6 +22,7 @@ use defect_agent::policy::{OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
     AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
 };
+use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{
     SafetyClass, Tool, ToolCallDescription, ToolContext, ToolEvent, ToolSchema, ToolStream,
 };
@@ -144,6 +145,7 @@ pub async fn build_session(
         cwd,
         vec![],
         Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+        Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
     )
     .await
     .expect("create session")

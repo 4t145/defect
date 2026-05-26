@@ -37,6 +37,7 @@ use crate::policy::{PolicyCtx, PolicyDecision, RecordedOutcome, SandboxPolicy};
 use crate::session::events::EventEmitter;
 use crate::session::permissions::PermissionGate;
 use crate::session::{History, ToolRegistry, TurnError};
+use crate::shell::ShellBackend;
 use crate::tool::{Tool, ToolContext, ToolError, ToolEvent};
 
 const DEFAULT_PROMPT_FILE: &str = "AGENTS.md";
@@ -153,6 +154,7 @@ pub struct TurnRunner<'a> {
     pub system_prompt: Option<String>,
     pub cwd: &'a std::path::Path,
     pub fs: Arc<dyn FsBackend>,
+    pub shell: Arc<dyn ShellBackend>,
 }
 
 impl<'a> TurnRunner<'a> {
@@ -403,7 +405,9 @@ impl<'a> TurnRunner<'a> {
                 }
                 next = stream.next() => match next {
                     None => {
-                        outcome.stop = LlmStopReason::EndTurn;
+                        if !outcome.saw_stop {
+                            outcome.stop = LlmStopReason::EndTurn;
+                        }
                         return Ok(outcome);
                     }
                     Some(Err(err)) => {
@@ -466,8 +470,9 @@ impl<'a> TurnRunner<'a> {
             }
             ProviderChunk::ToolUseEnd { .. } => false,
             ProviderChunk::Stop { reason } => {
+                outcome.saw_stop = true;
                 outcome.stop = reason;
-                true
+                false
             }
             ProviderChunk::Usage(u) => {
                 outcome.usage = add_usage(outcome.usage, u);
@@ -509,7 +514,12 @@ impl<'a> TurnRunner<'a> {
                 }
             };
 
-            let describe_ctx = ToolContext::new(self.cwd, self.cancel.clone(), self.fs.clone());
+            let describe_ctx = ToolContext::new(
+                self.cwd,
+                self.cancel.clone(),
+                self.fs.clone(),
+                self.shell.clone(),
+            );
             let description = tool.describe(&args, describe_ctx).await;
             self.events
                 .emit(AgentEvent::ToolCallStarted {
@@ -636,14 +646,25 @@ impl<'a> TurnRunner<'a> {
                     let events = self.events.clone();
                     let cwd = self.cwd.to_path_buf();
                     let fs = self.fs.clone();
+                    let shell = self.shell.clone();
                     let span = tracing::info_span!(
                         "tool_call",
                         tool = %tool.schema().name,
                         tool_call_id = %id,
                     );
                     joinset.spawn(
-                        drive_tool_stream(id, tool_use_id, tool, args, cwd, cancel, events, fs)
-                            .instrument(span),
+                        drive_tool_stream(
+                            id,
+                            tool_use_id,
+                            tool,
+                            args,
+                            cwd,
+                            cancel,
+                            events,
+                            fs,
+                            shell,
+                        )
+                        .instrument(span),
                     );
                 }
                 Approved::Denied { tool_use_id } => {
@@ -699,6 +720,7 @@ enum LlmAttempt {
 }
 
 struct DrainOutcome {
+    saw_stop: bool,
     stop: LlmStopReason,
     text_buf: String,
     thinking_buf: String,
@@ -711,6 +733,7 @@ struct DrainOutcome {
 impl Default for DrainOutcome {
     fn default() -> Self {
         Self {
+            saw_stop: false,
             stop: LlmStopReason::EndTurn,
             text_buf: String::new(),
             thinking_buf: String::new(),
@@ -1017,75 +1040,79 @@ async fn drive_tool_stream(
     cancel: CancellationToken,
     events: Arc<EventEmitter>,
     fs: Arc<dyn FsBackend>,
+    shell: Arc<dyn ShellBackend>,
 ) -> ToolResult {
-    let ctx = ToolContext::new(&cwd, cancel.clone(), fs.clone());
+    let ctx = ToolContext::new(&cwd, cancel.clone(), fs.clone(), shell.clone());
     let mut stream = tool.execute(args, ctx);
 
     let mut last_text: Option<String> = None;
 
-    loop {
-        tokio::select! {
-            biased;
-            () = cancel.cancelled() => {
-                events.emit(AgentEvent::ToolCallFinished {
-                    id: id.clone(),
-                    fields: failed_fields_text("cancelled".to_string()),
-                }).await;
-                return ToolResult {
-                    tool_use_id,
-                    body: ToolResultBody::Text { text: "cancelled".to_string() },
-                    is_error: true,
-                };
-            }
-            ev = stream.next() => match ev {
-                None => {
-                    events.emit(AgentEvent::ToolCallFinished {
-                        id: id.clone(),
-                        fields: failed_fields_text("tool stream closed without terminal event".to_string()),
-                    }).await;
-                    return ToolResult {
-                        tool_use_id,
-                        body: ToolResultBody::Text { text: "tool stream closed without terminal event".to_string() },
-                        is_error: true,
-                    };
+    // 注意：cancel 通过 ctx.cancel 注入工具内部，由工具自己感知并产出
+    // [`ToolEvent::Failed(ToolError::Canceled)`]——不要在驱动层加 cancel arm。
+    // 一旦驱动层 select 里 drop 掉 stream，工具内部任何在飞的 ACP 反向请求
+    // 的 oneshot::Receiver 都会被 drop，server 把"无人接收"映射成 internal_error
+    // 并撕掉整条连接（详见 `agent_client_protocol::jsonrpc::incoming_actor`
+    // 里 `router.respond_with_result` 的 ?）。Tool trait 契约：必须感知 cancel。
+    while let Some(ev) = stream.next().await {
+        match ev {
+            ToolEvent::Progress(fields) => {
+                if let Some(text) = extract_text(&fields) {
+                    last_text = Some(text);
                 }
-                Some(ToolEvent::Progress(fields)) => {
-                    if let Some(text) = extract_text(&fields) {
-                        last_text = Some(text);
-                    }
-                    events.emit(AgentEvent::ToolCallProgress {
+                events
+                    .emit(AgentEvent::ToolCallProgress {
                         id: id.clone(),
                         fields: with_status(fields, ToolCallStatus::InProgress),
-                    }).await;
+                    })
+                    .await;
+            }
+            ToolEvent::Completed(fields) => {
+                if let Some(text) = extract_text(&fields) {
+                    last_text = Some(text);
                 }
-                Some(ToolEvent::Completed(fields)) => {
-                    if let Some(text) = extract_text(&fields) {
-                        last_text = Some(text);
-                    }
-                    events.emit(AgentEvent::ToolCallFinished {
+                events
+                    .emit(AgentEvent::ToolCallFinished {
                         id: id.clone(),
                         fields: with_status(fields, ToolCallStatus::Completed),
-                    }).await;
-                    return ToolResult {
-                        tool_use_id,
-                        body: ToolResultBody::Text { text: last_text.unwrap_or_default() },
-                        is_error: false,
-                    };
-                }
-                Some(ToolEvent::Failed(err)) => {
-                    let text = err.to_string();
-                    let is_cancel = matches!(err, ToolError::Canceled);
-                    events.emit(AgentEvent::ToolCallFinished {
+                    })
+                    .await;
+                return ToolResult {
+                    tool_use_id,
+                    body: ToolResultBody::Text {
+                        text: last_text.unwrap_or_default(),
+                    },
+                    is_error: false,
+                };
+            }
+            ToolEvent::Failed(err) => {
+                let text = err.to_string();
+                let is_cancel = matches!(err, ToolError::Canceled);
+                events
+                    .emit(AgentEvent::ToolCallFinished {
                         id: id.clone(),
                         fields: failed_fields_text(text.clone()),
-                    }).await;
-                    return ToolResult {
-                        tool_use_id,
-                        body: ToolResultBody::Text { text },
-                        is_error: !is_cancel,
-                    };
-                }
+                    })
+                    .await;
+                return ToolResult {
+                    tool_use_id,
+                    body: ToolResultBody::Text { text },
+                    is_error: !is_cancel,
+                };
             }
         }
+    }
+
+    events
+        .emit(AgentEvent::ToolCallFinished {
+            id: id.clone(),
+            fields: failed_fields_text("tool stream closed without terminal event".to_string()),
+        })
+        .await;
+    ToolResult {
+        tool_use_id,
+        body: ToolResultBody::Text {
+            text: "tool stream closed without terminal event".to_string(),
+        },
+        is_error: true,
     }
 }

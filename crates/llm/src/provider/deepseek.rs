@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use tower::Service;
 
 use super::openai::{OpenAiConfig, OpenAiProvider};
+use crate::protocol::deepseek_chat;
 
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 const API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
@@ -141,7 +142,15 @@ impl LlmProvider for DeepSeekProvider {
         req: CompletionRequest,
         cancel: CancellationToken,
     ) -> BoxFuture<'_, Result<ProviderStream, ProviderError>> {
-        self.inner.complete(req, cancel)
+        async move {
+            let stream = self
+                .inner
+                .start_chat_completion_stream(req, cancel.clone())
+                .await?;
+            let decoded = deepseek_chat::decode_stream(stream, cancel);
+            Ok(Box::pin(decoded) as ProviderStream)
+        }
+        .boxed()
     }
 }
 

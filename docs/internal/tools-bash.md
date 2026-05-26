@@ -94,9 +94,12 @@ ToolCallUpdateFields {
 
 ## 4. `execute`
 
+> **后端可替换**：以下流程描述的是行为契约，实际进程生成走 [`ShellBackend`](../inbound/acp-shell.md#3-shellbackend-抽象) 抽象——`bash` 工具自身不再直接 `Command::new`。`defect-acp` 在 session 创建时按客户端 `terminal` 能力位选 `LocalShellBackend`（本地 spawn，等价于下图）或 `AcpShellBackend`（委托给 ACP 客户端的 PTY 跑）。工具层不感知后端差异；下面的"进程生成 / 输出捕获 / 终态映射"在两种后端下行为一致。详见 [`acp-shell.md`](../inbound/acp-shell.md)。
+
 ```text
-                tokio::process::Command::new(sh).arg("-c").arg(command)
-                    .current_dir(workdir).stdout(Pipe).stderr(Pipe).spawn()
+                ctx.shell.create(command, workdir)   // 后端可替换
+                  ─ Local: tokio::process::Command::new(sh).arg("-c").arg(command)
+                  ─ Acp:   terminal/create 反向请求
                                 │
             ┌───────────────────┼───────────────────┐
             ▼                   ▼                   ▼
@@ -301,13 +304,14 @@ fn resolve_workdir(cwd: &Path, requested: Option<&str>) -> Result<PathBuf, ToolE
 - **命令解析 / 白名单**：codex 走 [`execpolicy`](../coding-reference/codex/codex-rs/execpolicy/)（Starlark + 规则集 + [`shell-command/parse_command.rs`](../coding-reference/codex/codex-rs/shell-command/src/parse_command.rs) 的 2500 行 shell 词法分析器）。我们直接用而不是自己写。届时 §2 的 `safety_hint` 改成调 execpolicy 决定 `ReadOnly` / `Mutating` / `Destructive`，每条 bash 不再无脑 Destructive。
 - **argv 模式作为更安全形态**：codex 用 `Vec<String>` 把 program 与 args 分开 spawn，从协议层规避 shell 注入。我们 v0 用 `command: String` + `sh -c` 是为 LLM 友好（一行写完 pipeline / redirect），代价是注入风险归 LLM 负责。v1+ 可以并存两个工具：`bash`（任意 shell 行）走 ask_writes、`exec`（argv 形态）走更宽松 policy。
 - **spill-to-disk 大输出**：v0 超 1 MiB 直接 drop。opencode `shell.ts:435-596` 双缓冲：内存只留 tail、超量 spill 到 `/tmp` 临时文件、metadata 暴露文件路径让 LLM 后续用 `tail` / `grep` 取。v1 实现时要把临时文件生命周期挂到 session（session 关闭一起清）。
-- **流式增量输出**：v0 一次性 `Completed`（见 §4.2）。要做"边跑边在客户端滚"必须解决 wire 形态——要么走 ACP `terminal/create` 反向请求拿 `TerminalId` 后用 `ToolCallContent::Terminal` 引用（客户端读 terminal）、要么等 ACP 给 `content` 加 append 语义。前者是 ACP 标准答案，配合 `terminal` 工具一起做。
-- **持久 shell session**：codex 的 zsh-fork backend 让多次 `bash` 调用共享 PWD / env。我们 v0 每条命令都是新 `sh -c`。需要持久态时由 LLM 自己 `cd ... && cmd` 串成一行。
-- **交互式命令**：v0 `stdin=null` 截断。要交互式（PTY、子进程问 y/n）时引入新的 `terminal` 工具，对位 ACP [`terminal/create`] 反向请求；不挤进 `bash`。
+- **流式增量输出**：v0 一次性 `Completed`（见 §4.2）。`AcpShellBackend` 已经把"按 terminal_id 轮询输出"链路打通（[`acp-shell.md` §2.2]），但 `bash` 工具仍只在 `wait_for_exit` 后取一次——要做"边跑边在客户端滚"还要解决 wire 形态：要么用 `ToolCallContent::Terminal` 引用 terminal_id（客户端直接读 terminal）、要么等 ACP 给 `content` 加 append 语义。前者是 ACP 标准答案，配合 `terminal` 工具一起做。
+- **持久 shell session**：codex 的 zsh-fork backend 让多次 `bash` 调用共享 PWD / env。我们 v0 每条命令都是新 `sh -c`，`ShellBackend::create` 也是单命令一次性的。需要持久态时由 LLM 自己 `cd ... && cmd` 串成一行；后续可以让 backend 暴露"复用 terminal_id 跨调用"接口。
+- **交互式命令**：v0 `stdin=null` 截断。要交互式（PTY、子进程问 y/n）时引入新的 `terminal` 工具，直接暴露 `ShellBackend::create` + `input` / `output` 给 LLM 管理 PTY 生命周期；不挤进 `bash`。
 - **后台/异步执行**：`bash` 调用必须在 turn 内同步完成。需要"后台跑构建"时引入 `background_task` 工具，对位 ACP 的长跑机制。
 - **结构化输出捕获**：v0 `raw_output` 仅 `{exit_code, timed_out, truncated_bytes}`。LLM 想拿到 stdout / stderr 分流 / timing 信息时，要么解析 content 文本，要么等 `exec` 工具引入。
 
 [`terminal/create`]: https://agentclientprotocol.com/protocol/terminals
+[`acp-shell.md` §2.2]: ../inbound/acp-shell.md#22-terminaloutput
 
 ## 9. 落地节奏
 

@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::BoxError;
 use crate::fs::FsBackend;
+use crate::shell::ShellBackend;
 
 /// 工具的"对外名片"：只描述参数形状，不带任何执行能力。
 ///
@@ -125,19 +126,39 @@ pub struct ToolContext<'a> {
     /// 协商的 [`FileSystemCapabilities`] 选择 `LocalFsBackend` 或
     /// `AcpFsBackend`，工具实现完全不感知。
     ///
-    /// 用 [`Arc`] 而非借用：`Tool::execute` 返回 `'static` future / stream，
+    /// 用 [`Arc`] 而非借用：`Tool::execute` 返回 `'static` future / stream,
     /// 工具内部通常 `clone` 一份 fs 进入异步任务。借用形式无法跨过 await。
     ///
     /// [`FileSystemCapabilities`]: agent_client_protocol::schema::FileSystemCapabilities
     pub fs: Arc<dyn FsBackend>,
+    /// Shell 执行后端。`bash` 工具通过它创建 terminal 跑命令；装配时由
+    /// `defect-acp` 按客户端协商的 [`ClientCapabilities::terminal`] 选择
+    /// [`LocalShellBackend`] 或 [`AcpShellBackend`]，工具实现不感知。
+    ///
+    /// 与 `fs` 同款 `Arc` 取舍——`Tool::execute` 是 `'static` future。
+    ///
+    /// [`ClientCapabilities::terminal`]: agent_client_protocol::schema::ClientCapabilities
+    /// [`LocalShellBackend`]: defect_tools::shell::LocalShellBackend
+    /// [`AcpShellBackend`]: defect_acp::shell::AcpShellBackend
+    pub shell: Arc<dyn ShellBackend>,
 }
 
 impl<'a> ToolContext<'a> {
     /// 构造一个最小 `ToolContext`。`#[non_exhaustive]` 让外部 crate 不能直接
     /// 用结构体字面量构造——这个构造函数是 cross-crate 唯一入口。新增字段时
     /// 给签名加默认值或新构造函数，不破坏现有调用点。
-    pub fn new(cwd: &'a Path, cancel: CancellationToken, fs: Arc<dyn FsBackend>) -> Self {
-        Self { cwd, cancel, fs }
+    pub fn new(
+        cwd: &'a Path,
+        cancel: CancellationToken,
+        fs: Arc<dyn FsBackend>,
+        shell: Arc<dyn ShellBackend>,
+    ) -> Self {
+        Self {
+            cwd,
+            cancel,
+            fs,
+            shell,
+        }
     }
 }
 
