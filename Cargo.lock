@@ -2481,6 +2481,8 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "toac"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "149c17b48e4635e22fa6bb8e95d574d7f614310b09c6291b1e06fed29dd7b22f"
 dependencies = [
  "base64",
  "bytes",
@@ -2502,6 +2504,8 @@ dependencies = [
 [[package]]
 name = "toac-build"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aac85d8fdeca4e23a97264a92cb7d75180ecbd251392f7686d110246f3636bc6"
 dependencies = [
  "http",
  "oas3",
