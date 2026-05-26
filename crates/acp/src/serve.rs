@@ -293,6 +293,205 @@ fn provider_model_description(
     parts.join(", ")
 }
 
+/// 连接级共享状态。`serve_on` 给每个 handler 克隆一份 `Arc<ServeState>`。
+///
+/// `agent` 是注入的核心，连接生命周期内只读。`fs_mode` 由 `initialize` 写入、
+/// 后续 `session/new` 与 `session/load` 读取——RwLock 在读多写少的前提下保护
+/// 这一次握手结果。
+struct ServeState {
+    agent: Arc<dyn AgentCore>,
+    /// 客户端按 ACP 规范应当先 initialize 再 session/new。Default = `Local`
+    /// 是回归保守值——initialize 还没到时就 session/new 是协议违规，但即便如此
+    /// 我们也宁可走本地盘也不裸调反向请求。
+    fs_mode: RwLock<FsMode>,
+}
+
+impl ServeState {
+    fn new(agent: Arc<dyn AgentCore>) -> Self {
+        Self {
+            agent,
+            fs_mode: RwLock::new(FsMode::Local),
+        }
+    }
+
+    fn current_fs_mode(&self) -> FsMode {
+        self.fs_mode.read().map(|g| *g).unwrap_or(FsMode::Local)
+    }
+
+    /// 在 connection 级 fs_mode 与 session 级 cwd 之间组装 fs 后端。
+    fn fs_backend(
+        &self,
+        cx: &ConnectionTo<Client>,
+        session_id: &SessionId,
+        cwd: &std::path::Path,
+    ) -> Arc<dyn FsBackend> {
+        match self.current_fs_mode() {
+            FsMode::Delegated => Arc::new(AcpFsBackend::new(
+                cx.clone(),
+                session_id.clone(),
+                cwd.to_path_buf(),
+            )),
+            FsMode::Local => Arc::new(LocalFsBackend::new(cwd.to_path_buf())),
+        }
+    }
+
+    async fn on_initialize(
+        &self,
+        req: InitializeRequest,
+        responder: agent_client_protocol::Responder<InitializeResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let mode = decide_fs_mode(&req.client_capabilities);
+        tracing::debug!(
+            version = ?req.protocol_version,
+            fs_mode = ?mode,
+            "initialize"
+        );
+        if let Ok(mut guard) = self.fs_mode.write() {
+            *guard = mode;
+        }
+        responder.respond(
+            InitializeResponse::new(req.protocol_version)
+                .agent_capabilities(AgentCapabilities::new().load_session(true)),
+        )
+    }
+
+    async fn on_authenticate(
+        &self,
+        responder: agent_client_protocol::Responder<
+            agent_client_protocol::schema::AuthenticateResponse,
+        >,
+    ) -> Result<(), agent_client_protocol::Error> {
+        // v0 不开 auth；任何客户端发起的 auth 请求都按未实现拒绝。
+        responder.respond_with_error(AcpError::AuthNotSupported.into_wire_error())
+    }
+
+    async fn on_session_new(
+        &self,
+        req: NewSessionRequest,
+        responder: agent_client_protocol::Responder<NewSessionResponse>,
+        cx: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let cwd_for_log = req.cwd.clone();
+        let session_id = SessionId::new(uuid_like());
+        let fs = self.fs_backend(&cx, &session_id, &req.cwd);
+        match self
+            .agent
+            .create_session(session_id, req.cwd, req.mcp_servers, fs)
+            .await
+        {
+            Ok(session) => {
+                let models = session_model_state(session.as_ref()).await;
+                tracing::info!(
+                    session_id = %short_session_id(session.id()),
+                    cwd = %cwd_for_log.display(),
+                    "session created"
+                );
+                responder.respond(NewSessionResponse::new(session.id().clone()).models(models))
+            }
+            Err(err) => {
+                let acp_err = AcpError::CreateSession(err);
+                tracing::warn!(error = %acp_err, "create_session failed");
+                responder.respond_with_error(acp_err.into_wire_error())
+            }
+        }
+    }
+
+    async fn on_session_load(
+        &self,
+        req: LoadSessionRequest,
+        responder: agent_client_protocol::Responder<LoadSessionResponse>,
+        cx: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let session_id = req.session_id.clone();
+        let cwd_for_log = req.cwd.clone();
+        let fs = self.fs_backend(&cx, &session_id, &req.cwd);
+        match self.agent.load_session(session_id, fs).await {
+            Ok(session) => {
+                let models = session_model_state(session.as_ref()).await;
+                tracing::info!(
+                    session_id = %short_session_id(session.id()),
+                    cwd = %cwd_for_log.display(),
+                    "session loaded"
+                );
+                responder.respond(LoadSessionResponse::new().models(models))
+            }
+            Err(err) => {
+                let acp_err = match err {
+                    AgentError::SessionNotFound(id) => AcpError::SessionNotFound {
+                        session_id: id.0.to_string(),
+                    },
+                    other => AcpError::LoadSession(other),
+                };
+                tracing::warn!(error = %acp_err, "load_session failed");
+                responder.respond_with_error(acp_err.into_wire_error())
+            }
+        }
+    }
+
+    async fn on_set_model(
+        &self,
+        req: SetSessionModelRequest,
+        responder: agent_client_protocol::Responder<SetSessionModelResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let session_id = req.session_id.clone();
+        let Some(session) = self.agent.session(&session_id) else {
+            return responder.respond_with_error(
+                AcpError::SessionNotFound {
+                    session_id: session_id.0.to_string(),
+                }
+                .into_wire_error(),
+            );
+        };
+
+        match session.set_model(req.model_id.0.to_string()).await {
+            Ok(()) => responder.respond(SetSessionModelResponse::new()),
+            Err(err) => {
+                let acp_err = AcpError::SetModel(err);
+                tracing::warn!(
+                    session_id = %short_session_id(session.id()),
+                    error = %acp_err,
+                    "session/set_model failed"
+                );
+                responder.respond_with_error(acp_err.into_wire_error())
+            }
+        }
+    }
+
+    async fn on_prompt(
+        &self,
+        req: PromptRequest,
+        responder: agent_client_protocol::Responder<PromptResponse>,
+        cx: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let session_id = req.session_id.clone();
+        let Some(session) = self.agent.session(&session_id) else {
+            return responder.respond_with_error(
+                AcpError::SessionNotFound {
+                    session_id: session_id.0.to_string(),
+                }
+                .into_wire_error(),
+            );
+        };
+        // 把 turn 的执行扔到 spawn 任务里，handler 立即返回，
+        // 让 dispatch loop 不被阻塞——这样后续 cancel / resolve
+        // 等消息能在 turn 跑的同时被处理。
+        cx.spawn({
+            let cx = cx.clone();
+            async move { run_prompt_turn(session, session_id, req.prompt, cx, responder).await }
+        })
+    }
+
+    async fn on_cancel(
+        &self,
+        notif: CancelNotification,
+    ) -> Result<(), agent_client_protocol::Error> {
+        if let Some(session) = self.agent.session(&notif.session_id) {
+            session.cancel_turn();
+        }
+        Ok(())
+    }
+}
+
 /// 启动 stdio ACP 服务，阻塞到对端断开。
 ///
 /// `agent` 由 `defect-cli` 装配（含 provider / 工具 / 配置）后注入。
@@ -307,203 +506,69 @@ pub async fn serve_on<T>(agent: Arc<dyn AgentCore>, transport: T) -> Result<(), 
 where
     T: ConnectTo<Agent> + 'static,
 {
-    let agent_init = agent.clone();
-    let agent_session_new = agent.clone();
-    let agent_session_load = agent.clone();
-    let agent_set_model = agent.clone();
-    let agent_prompt = agent.clone();
-    let agent_cancel = agent.clone();
-
-    // 连接级 fs 协商结果。`initialize` 写入，`session/new` 读取。
-    // 客户端按 ACP 规范应当先 initialize 再 session/new，此处用 RwLock 保护
-    // 读多写少（一次 init 写一次、之后所有 session/new 都读）。Default = Local
-    // 是回归保守值——initialize 还没到时就 session/new 是协议违规，但即便如此
-    // 我们也宁可走本地盘也不裸调反向请求。
-    let fs_mode: Arc<RwLock<FsMode>> = Arc::new(RwLock::new(FsMode::Local));
-    let fs_mode_init = fs_mode.clone();
-    let fs_mode_new = fs_mode.clone();
+    let state = Arc::new(ServeState::new(agent));
 
     Agent
         .builder()
         .name("defect-agent")
         .on_receive_request(
-            async move |req: InitializeRequest, responder, _cx| {
-                let mode = decide_fs_mode(&req.client_capabilities);
-                tracing::debug!(
-                    version = ?req.protocol_version,
-                    fs_mode = ?mode,
-                    "initialize"
-                );
-                if let Ok(mut guard) = fs_mode_init.write() {
-                    *guard = mode;
+            {
+                let state = state.clone();
+                async move |req: InitializeRequest, responder, _cx| {
+                    state.on_initialize(req, responder).await
                 }
-                let _ = &agent_init;
-                responder.respond(
-                    InitializeResponse::new(req.protocol_version)
-                        .agent_capabilities(AgentCapabilities::new().load_session(true)),
-                )
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |_req: AuthenticateRequest, responder, _cx| {
-                // v0 不开 auth；任何客户端发起的 auth 请求都按未实现拒绝。
-                responder.respond_with_error(AcpError::AuthNotSupported.into_wire_error())
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
-                let agent = agent_session_new.clone();
-                let fs_mode = fs_mode_new.clone();
+                let state = state.clone();
+                async move |_req: AuthenticateRequest, responder, _cx| {
+                    state.on_authenticate(responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
                 async move |req: NewSessionRequest, responder, cx: ConnectionTo<Client>| {
-                    let agent = agent.clone();
-                    let cwd_for_log = req.cwd.clone();
-                    let session_id = SessionId::new(uuid_like());
-                    // 边界清理：在 connection 级 fs_mode 与 session 级 cwd 之间组装后端。
-                    let mode = fs_mode.read().map(|g| *g).unwrap_or(FsMode::Local);
-                    let fs: Arc<dyn FsBackend> = match mode {
-                        FsMode::Delegated => Arc::new(AcpFsBackend::new(
-                            cx.clone(),
-                            session_id.clone(),
-                            req.cwd.clone(),
-                        )),
-                        FsMode::Local => Arc::new(LocalFsBackend::new(req.cwd.clone())),
-                    };
-                    match agent
-                        .create_session(session_id, req.cwd, req.mcp_servers, fs)
-                        .await
-                    {
-                        Ok(session) => {
-                            let models = session_model_state(session.as_ref()).await;
-                            tracing::info!(
-                                session_id = %short_session_id(session.id()),
-                                cwd = %cwd_for_log.display(),
-                                "session created"
-                            );
-                            responder.respond(
-                                NewSessionResponse::new(session.id().clone()).models(models),
-                            )
-                        }
-                        Err(err) => {
-                            let acp_err = AcpError::CreateSession(err);
-                            tracing::warn!(error = %acp_err, "create_session failed");
-                            responder.respond_with_error(acp_err.into_wire_error())
-                        }
-                    }
+                    state.on_session_new(req, responder, cx).await
                 }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
-                let agent = agent_session_load.clone();
-                let fs_mode = fs_mode_new.clone();
+                let state = state.clone();
                 async move |req: LoadSessionRequest, responder, cx: ConnectionTo<Client>| {
-                    let agent = agent.clone();
-                    let session_id = req.session_id.clone();
-                    let cwd_for_log = req.cwd.clone();
-                    let mode = fs_mode.read().map(|g| *g).unwrap_or(FsMode::Local);
-                    let fs: Arc<dyn FsBackend> = match mode {
-                        FsMode::Delegated => Arc::new(AcpFsBackend::new(
-                            cx.clone(),
-                            session_id.clone(),
-                            req.cwd.clone(),
-                        )),
-                        FsMode::Local => Arc::new(LocalFsBackend::new(req.cwd.clone())),
-                    };
-                    match agent.load_session(session_id.clone(), fs).await {
-                        Ok(session) => {
-                            let models = session_model_state(session.as_ref()).await;
-                            tracing::info!(
-                                session_id = %short_session_id(session.id()),
-                                cwd = %cwd_for_log.display(),
-                                "session loaded"
-                            );
-                            responder.respond(LoadSessionResponse::new().models(models))
-                        }
-                        Err(err) => {
-                            let acp_err = match err {
-                                AgentError::SessionNotFound(id) => AcpError::SessionNotFound {
-                                    session_id: id.0.to_string(),
-                                },
-                                other => AcpError::LoadSession(other),
-                            };
-                            tracing::warn!(error = %acp_err, "load_session failed");
-                            responder.respond_with_error(acp_err.into_wire_error())
-                        }
-                    }
+                    state.on_session_load(req, responder, cx).await
                 }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
-                let agent = agent_set_model.clone();
+                let state = state.clone();
                 async move |req: SetSessionModelRequest, responder, _cx| {
-                    let agent = agent.clone();
-                    let session_id = req.session_id.clone();
-                    let Some(session) = agent.session(&session_id) else {
-                        return responder.respond_with_error(
-                            AcpError::SessionNotFound {
-                                session_id: session_id.0.to_string(),
-                            }
-                            .into_wire_error(),
-                        );
-                    };
-
-                    match session.set_model(req.model_id.0.to_string()).await {
-                        Ok(()) => responder.respond(SetSessionModelResponse::new()),
-                        Err(err) => {
-                            let acp_err = AcpError::SetModel(err);
-                            tracing::warn!(
-                                session_id = %short_session_id(session.id()),
-                                error = %acp_err,
-                                "session/set_model failed"
-                            );
-                            responder.respond_with_error(acp_err.into_wire_error())
-                        }
-                    }
+                    state.on_set_model(req, responder).await
                 }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
-                let agent = agent_prompt.clone();
+                let state = state.clone();
                 async move |req: PromptRequest, responder, cx: ConnectionTo<Client>| {
-                    let agent = agent.clone();
-                    let session_id = req.session_id.clone();
-                    let Some(session) = agent.session(&session_id) else {
-                        return responder.respond_with_error(
-                            AcpError::SessionNotFound {
-                                session_id: session_id.0.to_string(),
-                            }
-                            .into_wire_error(),
-                        );
-                    };
-                    // 把 turn 的执行扔到 spawn 任务里，handler 立即返回，
-                    // 让 dispatch loop 不被阻塞——这样后续 cancel / resolve
-                    // 等消息能在 turn 跑的同时被处理。
-                    cx.spawn({
-                        let cx = cx.clone();
-                        async move {
-                            run_prompt_turn(session, session_id, req.prompt, cx, responder).await
-                        }
-                    })
+                    state.on_prompt(req, responder, cx).await
                 }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_notification(
             {
-                let agent = agent_cancel.clone();
-                async move |notif: CancelNotification, _cx| {
-                    if let Some(session) = agent.session(&notif.session_id) {
-                        session.cancel_turn();
-                    }
-                    Ok(())
-                }
+                let state = state.clone();
+                async move |notif: CancelNotification, _cx| state.on_cancel(notif).await
             },
             agent_client_protocol::on_receive_notification!(),
         )

@@ -106,12 +106,33 @@ fn encode_minimal_request() {
     assert!(matches!(wire_req.stream, Some(true)));
     assert!(matches!(
         wire_req.system,
-        Some(wire::SystemPrompt::SystemPromptVariant0(ref s)) if s == "you are helpful"
+        Some(wire::SystemPrompt::SystemPromptVariant1(ref blocks))
+            if matches!(
+                blocks.as_slice(),
+                [wire::TextBlockParam {
+                    text,
+                    cache_control: Some(_),
+                    ..
+                }] if text == "you are helpful"
+            )
     ));
     assert_eq!(wire_req.messages.len(), 1);
     assert!(matches!(
         wire_req.messages[0].role,
         wire::MessageParamRole::User
+    ));
+    let wire::MessageParamContent::MessageParamContentVariant1(content) =
+        &wire_req.messages[0].content
+    else {
+        panic!("expected list content");
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [wire::ContentBlockParam::TextBlockParam(wire::TextBlockParam {
+            text,
+            cache_control: Some(_),
+            ..
+        })] if text == "hi"
     ));
     assert!(wire_req.tools.is_none());
     assert!(matches!(
@@ -228,6 +249,7 @@ fn encode_request_tool_uses_and_results() {
     assert_eq!(tu.id, "toolu_1");
     assert_eq!(tu.name, "fs_read");
     assert_eq!(tu.input.get("path"), Some(&json!("/tmp/a")));
+    assert!(tu.cache_control.is_some());
 
     // user tool_result round-trip
     let user = match &w.messages[1].content {
@@ -239,6 +261,12 @@ fn encode_request_tool_uses_and_results() {
     };
     assert_eq!(tr.tool_use_id, "toolu_1");
     assert_eq!(tr.is_error, Some(false));
+
+    let tools = w.tools.expect("tools");
+    let wire::ToolUnion::Tool(tool) = &tools[0] else {
+        panic!("expected Tool");
+    };
+    assert!(tool.cache_control.is_some());
 }
 
 // ---------- thinking round-trip (signature gating) ---------------------

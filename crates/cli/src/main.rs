@@ -14,7 +14,6 @@
 //! 取值：`echo` | `anthropic` | `openai` | `deepseek`。
 //! 凭证仍由各 provider 从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
 //! `DEEPSEEK_API_KEY` 读取。
-#![warn(clippy::indexing_slicing, clippy::unwrap_used)]
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -38,15 +38,42 @@ use crate::wire::anthropic::components as wire;
 /// 绝大多数情况；调用方有更精确的值时应通过 sampling 显式给出。
 pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 
+/// Anthropic prompt cache 最多接受 4 个 ephemeral cache breakpoint。
+const MAX_CACHE_BREAKPOINTS: usize = 4;
+
 /// 把 [`CompletionRequest`] 编为 wire 请求体。
 ///
 /// 强制 `stream = true`：协议层只跑 SSE 分支。
 pub fn encode_request(req: &CompletionRequest) -> wire::CreateMessageParams {
     let max_tokens = req.sampling.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+    let mut prompt_cache = PromptCache::new();
+    let system = req.system.as_deref().map(|text| {
+        wire::SystemPrompt::SystemPromptVariant1(vec![wire::TextBlockParam {
+            text: text.to_owned(),
+            r#type: wire::TextBlockParamType::Text,
+            cache_control: prompt_cache.next_breakpoint(),
+            citations: None,
+        }])
+    });
+    let messages = req
+        .messages
+        .iter()
+        .map(|message| encode_message(message, &mut prompt_cache))
+        .collect();
+    let tools = if req.tools.is_empty() {
+        None
+    } else {
+        Some(
+            req.tools
+                .iter()
+                .map(|tool| encode_tool(tool, &mut prompt_cache))
+                .collect(),
+        )
+    };
 
     wire::CreateMessageParams {
         max_tokens: i64::from(max_tokens),
-        messages: req.messages.iter().map(encode_message).collect(),
+        messages,
         model: wire::Model::ModelVariant1(req.model.clone()),
         cache_control: None,
         container: None,
@@ -60,42 +87,41 @@ pub fn encode_request(req: &CompletionRequest) -> wire::CreateMessageParams {
             Some(req.sampling.stop_sequences.clone())
         },
         stream: Some(true),
-        system: req
-            .system
-            .clone()
-            .map(wire::SystemPrompt::SystemPromptVariant0),
+        system,
         temperature: req.sampling.temperature,
         thinking: encode_thinking(req.sampling.thinking),
         tool_choice: encode_tool_choice(&req.tool_choice),
-        tools: if req.tools.is_empty() {
-            None
-        } else {
-            Some(req.tools.iter().map(encode_tool).collect())
-        },
+        tools,
         top_k: req.sampling.top_k.map(i64::from),
         top_p: req.sampling.top_p,
     }
 }
 
-fn encode_message(m: &Message) -> wire::MessageParam {
+fn encode_message(m: &Message, prompt_cache: &mut PromptCache) -> wire::MessageParam {
     wire::MessageParam {
         role: match m.role {
             Role::User => wire::MessageParamRole::User,
             Role::Assistant => wire::MessageParamRole::Assistant,
         },
         content: wire::MessageParamContent::MessageParamContentVariant1(
-            m.content.iter().filter_map(encode_content).collect(),
+            m.content
+                .iter()
+                .filter_map(|content| encode_content(content, prompt_cache))
+                .collect(),
         ),
     }
 }
 
-fn encode_content(c: &MessageContent) -> Option<wire::ContentBlockParam> {
+fn encode_content(
+    c: &MessageContent,
+    prompt_cache: &mut PromptCache,
+) -> Option<wire::ContentBlockParam> {
     match c {
         MessageContent::Text { text } => Some(wire::ContentBlockParam::TextBlockParam(
             wire::TextBlockParam {
                 text: text.clone(),
                 r#type: wire::TextBlockParamType::Text,
-                cache_control: None,
+                cache_control: prompt_cache.next_breakpoint(),
                 citations: None,
             },
         )),
@@ -118,7 +144,7 @@ fn encode_content(c: &MessageContent) -> Option<wire::ContentBlockParam> {
                 input: json_value_to_object(args),
                 name: name.clone(),
                 r#type: wire::ToolUseBlockParamType::ToolUse,
-                cache_control: None,
+                cache_control: prompt_cache.next_breakpoint(),
                 caller: None,
             }),
         ),
@@ -126,12 +152,17 @@ fn encode_content(c: &MessageContent) -> Option<wire::ContentBlockParam> {
             tool_use_id,
             output,
             is_error,
-        } => Some(encode_tool_result(tool_use_id, output, *is_error)),
+        } => Some(encode_tool_result(
+            tool_use_id,
+            output,
+            *is_error,
+            prompt_cache,
+        )),
         MessageContent::Image { mime, data } => Some(wire::ContentBlockParam::ImageBlockParam(
             wire::ImageBlockParam {
                 source: encode_image_source(mime, data),
                 r#type: wire::ImageBlockParamType::Image,
-                cache_control: None,
+                cache_control: prompt_cache.next_breakpoint(),
             },
         )),
         // 内部枚举是 non_exhaustive；新增 variant 时落到此处的回退是
@@ -140,7 +171,7 @@ fn encode_content(c: &MessageContent) -> Option<wire::ContentBlockParam> {
             wire::TextBlockParam {
                 text: String::new(),
                 r#type: wire::TextBlockParamType::Text,
-                cache_control: None,
+                cache_control: prompt_cache.next_breakpoint(),
                 citations: None,
             },
         )),
@@ -151,6 +182,7 @@ fn encode_tool_result(
     tool_use_id: &str,
     output: &ToolResultBody,
     is_error: bool,
+    prompt_cache: &mut PromptCache,
 ) -> wire::ContentBlockParam {
     let text = match output {
         ToolResultBody::Text { text } => text.clone(),
@@ -160,7 +192,7 @@ fn encode_tool_result(
     wire::ContentBlockParam::ToolResultBlockParam(wire::ToolResultBlockParam {
         tool_use_id: tool_use_id.to_owned(),
         r#type: wire::ToolResultBlockParamType::ToolResult,
-        cache_control: None,
+        cache_control: prompt_cache.next_breakpoint(),
         content: Some(
             wire::ToolResultBlockParamContent102::ToolResultBlockParamContent102Variant1(vec![
                 wire::ToolResultBlockParamContent::TextBlockParam(wire::TextBlockParam {
@@ -242,7 +274,7 @@ fn encode_tool_choice(c: &ToolChoice) -> Option<wire::ToolChoice> {
     }
 }
 
-fn encode_tool(t: &ToolSchema) -> wire::ToolUnion {
+fn encode_tool(t: &ToolSchema, prompt_cache: &mut PromptCache) -> wire::ToolUnion {
     let (properties, required) = split_input_schema(&t.input_schema);
     wire::ToolUnion::Tool(wire::Tool {
         input_schema: wire::ToolInputSchema {
@@ -252,7 +284,7 @@ fn encode_tool(t: &ToolSchema) -> wire::ToolUnion {
         },
         name: t.name.clone(),
         allowed_callers: None,
-        cache_control: None,
+        cache_control: prompt_cache.next_breakpoint(),
         defer_loading: None,
         description: if t.description.is_empty() {
             None
@@ -264,6 +296,29 @@ fn encode_tool(t: &ToolSchema) -> wire::ToolUnion {
         strict: None,
         r#type: None,
     })
+}
+
+struct PromptCache {
+    remaining_breakpoints: usize,
+}
+
+impl PromptCache {
+    fn new() -> Self {
+        Self {
+            remaining_breakpoints: MAX_CACHE_BREAKPOINTS,
+        }
+    }
+
+    fn next_breakpoint(&mut self) -> Option<wire::CacheControlEphemeral> {
+        if self.remaining_breakpoints == 0 {
+            return None;
+        }
+        self.remaining_breakpoints -= 1;
+        Some(wire::CacheControlEphemeral {
+            r#type: wire::CacheControlEphemeralType::Ephemeral,
+            ttl: None,
+        })
+    }
 }
 
 /// 拆 JSON Schema 顶层为 `properties` / `required` —— `ToolInputSchema`

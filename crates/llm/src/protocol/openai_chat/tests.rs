@@ -199,6 +199,65 @@ fn encode_request_carries_sampling_and_thinking() {
 }
 
 #[test]
+fn encode_request_sets_stable_prompt_cache_key_from_prefix_shape() {
+    let req = CompletionRequest {
+        model: "gpt-4o-mini".into(),
+        system: Some("you are helpful".into()),
+        messages: vec![Message {
+            role: Role::User,
+            content: vec![MessageContent::Text {
+                text: "turn-specific text".into(),
+            }],
+        }],
+        tools: vec![ToolSchema {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            }),
+        }],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+    };
+
+    let first = encode_request(&req).prompt_cache_key;
+    let mut req_with_new_turn_text = req.clone();
+    req_with_new_turn_text.messages = vec![Message {
+        role: Role::User,
+        content: vec![MessageContent::Text {
+            text: "different turn text".into(),
+        }],
+    }];
+    let second = encode_request(&req_with_new_turn_text).prompt_cache_key;
+
+    assert_eq!(
+        first, second,
+        "turn-local messages should not perturb cache key"
+    );
+    assert!(first.is_some());
+}
+
+#[test]
+fn encode_request_changes_prompt_cache_key_when_prefix_changes() {
+    let req = CompletionRequest {
+        model: "gpt-4o-mini".into(),
+        system: Some("system-a".into()),
+        messages: vec![],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+    };
+    let base = encode_request(&req).prompt_cache_key;
+
+    let mut changed = req.clone();
+    changed.system = Some("system-b".into());
+    let changed_key = encode_request(&changed).prompt_cache_key;
+
+    assert_ne!(base, changed_key);
+}
+
+#[test]
 fn encode_request_splits_tool_use_and_tool_result_into_separate_messages() {
     let req = CompletionRequest {
         model: "gpt-4o-mini".into(),

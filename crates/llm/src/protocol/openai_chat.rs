@@ -32,6 +32,10 @@ use crate::wire::openai::components as wire;
 
 // ---------- encode -------------------------------------------------------
 
+const PROMPT_CACHE_KEY_PREFIX: &str = "defect:chat:v1:";
+const PROMPT_CACHE_KEY_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const PROMPT_CACHE_KEY_PRIME: u64 = 0x0000_0001_0000_01b3;
+
 /// 把 [`CompletionRequest`] 编为 wire 请求体。
 ///
 /// 关键映射决策（详见 `docs/outbound/llm-openai.md` §6.1）：
@@ -118,7 +122,7 @@ pub fn encode_request_with_echo(
         top_logprobs: None,
         user: None,
         safety_identifier: None,
-        prompt_cache_key: None,
+        prompt_cache_key: Some(build_prompt_cache_key(req, echo_mode)),
         service_tier: None,
         prompt_cache_retention: None,
         modalities: None,
@@ -138,6 +142,76 @@ pub fn encode_request_with_echo(
         parallel_tool_calls: None,
         function_call: None,
         functions: None,
+    }
+}
+
+fn build_prompt_cache_key(req: &CompletionRequest, echo_mode: ThinkingEcho) -> String {
+    let mut hasher = PromptCacheKeyHasher::new();
+    hasher.write_str(&req.model);
+    if let Some(system) = req.system.as_deref() {
+        hasher.write_str(system);
+    }
+    hasher.write_str(prompt_cache_echo_mode(echo_mode));
+    hasher.write_str(prompt_cache_tool_choice(&req.tool_choice));
+    hasher.write_json(&req.tools);
+    format!("{PROMPT_CACHE_KEY_PREFIX}{:016x}", hasher.finish())
+}
+
+fn prompt_cache_echo_mode(mode: ThinkingEcho) -> &'static str {
+    match mode {
+        ThinkingEcho::Forbidden => "forbidden",
+        ThinkingEcho::Required => "required",
+        ThinkingEcho::Optional => "optional",
+        _ => "unknown",
+    }
+}
+
+fn prompt_cache_tool_choice(choice: &ToolChoice) -> &str {
+    match choice {
+        ToolChoice::Auto => "auto",
+        ToolChoice::Required => "required",
+        ToolChoice::Named { name } => name.as_str(),
+        ToolChoice::None => "none",
+        _ => "unknown",
+    }
+}
+
+struct PromptCacheKeyHasher {
+    state: u64,
+}
+
+impl PromptCacheKeyHasher {
+    fn new() -> Self {
+        Self {
+            state: PROMPT_CACHE_KEY_OFFSET_BASIS,
+        }
+    }
+
+    fn write_json<T>(&mut self, value: &T)
+    where
+        T: serde::Serialize,
+    {
+        let Ok(encoded) = serde_json::to_vec(value) else {
+            return;
+        };
+        self.write_bytes(&encoded);
+    }
+
+    fn write_str(&mut self, value: &str) {
+        self.write_bytes(value.as_bytes());
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.state ^= u64::from(*byte);
+            self.state = self.state.wrapping_mul(PROMPT_CACHE_KEY_PRIME);
+        }
+        self.state ^= u64::from(b'\n');
+        self.state = self.state.wrapping_mul(PROMPT_CACHE_KEY_PRIME);
+    }
+
+    fn finish(self) -> u64 {
+        self.state
     }
 }
 

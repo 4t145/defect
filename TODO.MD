@@ -40,24 +40,34 @@
 | outbound | Anthropic provider（messages API + 流式）                      | `docs/outbound/llm-anthropic.md`                                        | P0     | ✅ 已完成 |
 | outbound | OpenAI 兼容 provider（chat completions + 流式）                | `docs/outbound/llm-openai.md`                                           | P0     | ✅ 已完成 |
 | outbound | LLM provider 集测（wiremock 离线 e2e，两家）                   | `docs/outbound/llm-anthropic.md` §10 / `docs/outbound/llm-openai.md` §9 | P1     | ✅ 已完成 |
-| outbound | LLM provider 真端点 smoke（examples/，手动跑）                 | —                                                                       | P2     | ✅ 已完成 |
 | outbound | HTTP 客户端基础设施（超时/重试/代理/UA）                       | `docs/outbound/http.md`                                                 | P1     | 🕒 未开始 |
 | outbound | tracing 接入（结构化日志 + EnvFilter）                         | `docs/outbound/tracing.md`                                              | P0     | ✅ 已完成 |
-| outbound | tracing OTLP exporter（导出到外部 collector）                  | `docs/outbound/tracing-otlp.md`                                         | P2     | 🕒 未开始 |
 | outbound | MCP client（stdio + sse 传输）                                 | `docs/outbound/mcp-client.md`                                           | P1     | ✅ 已完成 |
 | outbound | MCP 工具适配层（包装为内部 Tool trait）                        | `docs/outbound/mcp-adapter.md`                                          | P1     | ✅ 已完成 |
 | inbound  | ACP 桥接层总体设计（薄壳形态、方法分发、AgentEvent 投影）      | `docs/inbound/acp-bridge.md`                                            | P0     | ✅ 已完成 |
 | inbound  | ACP 握手与能力协商（initialize / authenticate）                | `docs/inbound/acp-handshake.md`                                         | P0     | ✅ 已完成 |
 | inbound  | ACP 会话生命周期（new / load）                                 | `docs/inbound/acp-session.md`                                           | P0     | ✅ 已完成 |
 | inbound  | ACP prompt/turn 桥接细化（字段语义、image 处理）               | `docs/inbound/acp-prompt.md`                                            | P0     | ✅ 已完成 |
-| inbound  | ACP Content 兼容性补全（Image / Resource / EmbeddedResource 等） | `docs/inbound/acp-prompt.md`                                            | P1     | 🕒 未开始 |
+| inbound  | ACP Content 兼容性补全（Image / Resource / EmbeddedResource 等） | `docs/inbound/acp-prompt.md`                                            | P1     | ✅ 已完成 |
 | inbound  | ACP 权限请求桥（requestPermission）                            | `docs/inbound/acp-permission.md`                                        | P0     | ✅ 已完成 |
 | inbound  | ACP 文件系统委托（通过客户端读写）                             | `docs/inbound/acp-fs.md`                                                | P1     | ✅ 已完成 |
+| inbound  | ACP shell 委托（通过客户端跑终端命令）                         | `docs/inbound/acp-shell.md`                                             | P2     | 🕒 未开始 |
 | inbound  | ACP 取消/中断（cancel turn 边界 case）                         | `docs/inbound/acp-cancel.md`                                            | P1     | ✅ 已完成 |
 | inbound  | ACP 暴露 session 模型候选并支持 `session/set_model`            | `docs/inbound/acp-session.md`                                           | P1     | 🚧 进行中 |
 | 基础     | CLI 入口（参数解析、组装、跑 ACP server）                      | `docs/cli.md`                                                           | P0     | ✅ 已完成 |
 | 基础     | 端到端冒烟用例（CLI ←→ 假 ACP client ←→ 假 LLM）               | `docs/testing/e2e.md`                                                   | P1     | ✅ 已完成 |
 | 基础     | CLI MCP 冒烟用例（真实 defect 二进制 + 假 OpenAI + stdio MCP） | `docs/testing/e2e.md`                                                   | P1     | ✅ 已完成 |
+
+---
+
+## 远期目标
+
+| 域       | 功能点                                                         | 文档                          | 完成情况 |
+| -------- | -------------------------------------------------------------- | ----------------------------- | -------- |
+| outbound | LLM provider 真端点 smoke（examples/，手动跑）                 | —                             | ✅ 已完成 |
+| outbound | tracing OTLP exporter（导出到外部 collector）                  | `docs/outbound/tracing-otlp.md` | 🕒 未开始 |
+| inbound  | ACP Content 音频输入支持                                       | `docs/inbound/acp-prompt.md`  | 🕒 未开始 |
+| inbound  | ACP Content 二进制资源支持（BlobResourceContents）              | `docs/inbound/acp-prompt.md`  | 🕒 未开始 |
 
 ---
 

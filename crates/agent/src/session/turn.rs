@@ -178,25 +178,25 @@ impl<'a> TurnRunner<'a> {
 
         let result = self.run_inner().await;
 
-        if let Ok(reason) = &result {
+        if let Ok(outcome) = &result {
             self.events
                 .emit(AgentEvent::TurnEnded {
-                    reason: *reason,
-                    usage: Usage::default(),
+                    reason: outcome.reason,
+                    usage: outcome.usage,
                 })
                 .await;
         }
         // Err 路径不发 TurnEnded：桥接层据 future outcome 自行决定 wire 响应。
 
-        result
+        result.map(|outcome| outcome.reason)
     }
 
-    async fn run_inner(&self) -> Result<AcpStopReason, TurnError> {
+    async fn run_inner(&self) -> Result<TurnOutcome, TurnError> {
         let mut state = TurnState::new(self.config.request_limit);
 
         loop {
             if self.cancel.is_cancelled() {
-                return Ok(AcpStopReason::Cancelled);
+                return Ok(turn_outcome(&state, AcpStopReason::Cancelled));
             }
 
             self.maybe_compact().await?;
@@ -207,7 +207,7 @@ impl<'a> TurnRunner<'a> {
             let outcome = self.drain_provider_stream(&mut stream, &mut state).await?;
 
             if outcome.cancelled {
-                return Ok(AcpStopReason::Cancelled);
+                return Ok(turn_outcome(&state, AcpStopReason::Cancelled));
             }
 
             let assistant = assistant_message(&outcome);
@@ -217,20 +217,26 @@ impl<'a> TurnRunner<'a> {
 
             match outcome.stop {
                 LlmStopReason::EndTurn | LlmStopReason::StopSequence => {
-                    return Ok(AcpStopReason::EndTurn);
+                    return Ok(turn_outcome(&state, AcpStopReason::EndTurn));
                 }
-                LlmStopReason::Refusal => return Ok(AcpStopReason::Refusal),
-                LlmStopReason::MaxTokens => return Ok(AcpStopReason::MaxTokens),
+                LlmStopReason::Refusal => {
+                    return Ok(turn_outcome(&state, AcpStopReason::Refusal));
+                }
+                LlmStopReason::MaxTokens => {
+                    return Ok(turn_outcome(&state, AcpStopReason::MaxTokens));
+                }
                 LlmStopReason::ToolUse => {}
             }
 
             if outcome.tool_uses.is_empty() {
-                return Ok(AcpStopReason::EndTurn);
+                return Ok(turn_outcome(&state, AcpStopReason::EndTurn));
             }
 
             let approved = match self.decide_permissions(&outcome.tool_uses).await? {
                 DecisionFlow::Continue(list) => list,
-                DecisionFlow::Cancelled => return Ok(AcpStopReason::Cancelled),
+                DecisionFlow::Cancelled => {
+                    return Ok(turn_outcome(&state, AcpStopReason::Cancelled));
+                }
             };
 
             let progressed = approved.iter().any(|a| matches!(a, Approved::Run { .. }));
@@ -242,7 +248,7 @@ impl<'a> TurnRunner<'a> {
             self.history.append(tool_results_message(results));
 
             if state.exceeded_request_cap() {
-                return Ok(AcpStopReason::MaxTurnRequests);
+                return Ok(turn_outcome(&state, AcpStopReason::MaxTurnRequests));
             }
         }
     }
@@ -745,6 +751,12 @@ enum DecisionFlow {
     Cancelled,
 }
 
+#[derive(Clone, Copy)]
+struct TurnOutcome {
+    reason: AcpStopReason,
+    usage: Usage,
+}
+
 struct ToolResult {
     tool_use_id: String,
     body: ToolResultBody,
@@ -942,6 +954,13 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
         (Some(x), Some(y)) => Some(x.saturating_add(y)),
         (Some(x), None) | (None, Some(x)) => Some(x),
         (None, None) => None,
+    }
+}
+
+fn turn_outcome(state: &TurnState, reason: AcpStopReason) -> TurnOutcome {
+    TurnOutcome {
+        reason,
+        usage: state.usage,
     }
 }
 

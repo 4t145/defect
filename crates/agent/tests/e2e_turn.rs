@@ -19,7 +19,7 @@ use defect_agent::fs::{FsBackend, NoopFsBackend};
 use defect_agent::llm::{
     Capabilities, CompletionRequest, FeatureSupport, LlmProvider, ModelInfo, ProtocolId,
     ProviderChunk, ProviderError, ProviderInfo, ProviderStream, StopReason as LlmStopReason,
-    ThinkingEcho,
+    ThinkingEcho, Usage,
 };
 use defect_agent::policy::{AskWritesPolicy, OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
@@ -96,6 +96,12 @@ impl LlmProvider for ScriptedProvider {
                         id: "msg-1".to_string(),
                         model: "scripted-001".to_string(),
                     }),
+                    Ok(ProviderChunk::Usage(Usage {
+                        input_tokens: Some(11),
+                        output_tokens: None,
+                        cache_read_input_tokens: Some(7),
+                        cache_creation_input_tokens: Some(19),
+                    })),
                     Ok(ProviderChunk::TextDelta {
                         text: "calling tool".to_string(),
                     }),
@@ -119,6 +125,12 @@ impl LlmProvider for ScriptedProvider {
                         id: "msg-2".to_string(),
                         model: "scripted-001".to_string(),
                     }),
+                    Ok(ProviderChunk::Usage(Usage {
+                        input_tokens: Some(5),
+                        output_tokens: Some(3),
+                        cache_read_input_tokens: Some(2),
+                        cache_creation_input_tokens: None,
+                    })),
                     Ok(ProviderChunk::TextDelta {
                         text: "done".to_string(),
                     }),
@@ -254,14 +266,16 @@ async fn full_turn_with_one_tool_call() {
     let mut got_tool_call_started = false;
     let mut got_tool_call_finished = false;
     let mut got_turn_ended = false;
+    let mut turn_usage = None;
     while let Some(ev) = events.next().await {
         match ev {
             AgentEvent::UserPromptCommitted { .. } => got_user_prompt_committed = true,
             AgentEvent::AssistantText { .. } => got_text = true,
             AgentEvent::ToolCallStarted { .. } => got_tool_call_started = true,
             AgentEvent::ToolCallFinished { .. } => got_tool_call_finished = true,
-            AgentEvent::TurnEnded { .. } => {
+            AgentEvent::TurnEnded { usage, .. } => {
                 got_turn_ended = true;
+                turn_usage = Some(usage);
                 break;
             }
             _ => {}
@@ -273,6 +287,15 @@ async fn full_turn_with_one_tool_call() {
     assert!(got_tool_call_started, "should see ToolCallStarted");
     assert!(got_tool_call_finished, "should see ToolCallFinished");
     assert!(got_turn_ended, "should see TurnEnded");
+    assert_eq!(
+        turn_usage,
+        Some(Usage {
+            input_tokens: Some(16),
+            output_tokens: Some(3),
+            cache_read_input_tokens: Some(9),
+            cache_creation_input_tokens: Some(19),
+        })
+    );
 }
 
 #[tokio::test]
