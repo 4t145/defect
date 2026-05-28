@@ -536,8 +536,8 @@ impl HookEngine for DefaultHookEngine {
                 let handler_ctx = HookCtx::new(ctx.session_id, ctx.cwd, ctx.cancel.clone());
                 // 在 BoxFuture 上跑 catch_unwind：handler 内 panic 转 HandlerFailed
                 // 后由下方 outcome 处理逻辑按 §3.5 降级。
-                let fut = AssertUnwindSafe(entry.handler.handle(&borrowed, handler_ctx))
-                    .catch_unwind();
+                let fut =
+                    AssertUnwindSafe(entry.handler.handle(&borrowed, handler_ctx)).catch_unwind();
                 let result = match tokio::time::timeout(timeout, fut).await {
                     Ok(Ok(Ok(outcome))) => Ok(outcome),
                     Ok(Ok(Err(err))) => Err(err),
@@ -671,11 +671,9 @@ impl OwnedHookEvent {
                 safety: *safety,
             },
             Self::PostToolUse { id, name, fields } => HookEvent::PostToolUse { id, name, fields },
-            Self::PostToolUseFailure { id, name, error } => HookEvent::PostToolUseFailure {
-                id,
-                name,
-                error,
-            },
+            Self::PostToolUseFailure { id, name, error } => {
+                HookEvent::PostToolUseFailure { id, name, error }
+            }
             Self::Other => unreachable!("OwnedHookEvent::Other should never be borrowed"),
         }
     }
@@ -723,8 +721,7 @@ fn merge_outcome(
             }
             (HookEventKind::UserPromptSubmit, HookPatch::UserPrompt { prepend, append }) => {
                 if let OwnedHookEvent::UserPromptSubmit { content } = state {
-                    let mut next =
-                        Vec::with_capacity(prepend.len() + content.len() + append.len());
+                    let mut next = Vec::with_capacity(prepend.len() + content.len() + append.len());
                     next.extend(prepend.clone());
                     next.append(content);
                     next.extend(append.clone());
@@ -1046,12 +1043,7 @@ mod test {
         let id = ToolCallId::new("c1");
         let args = Value::Null;
         let m = HookMatcher::default();
-        assert!(m.matches(&pre_tool_use(
-            &id,
-            "anything",
-            &args,
-            SafetyClass::ReadOnly
-        )));
+        assert!(m.matches(&pre_tool_use(&id, "anything", &args, SafetyClass::ReadOnly)));
         let cwd = std::path::Path::new("/");
         assert!(m.matches(&HookEvent::SessionStart {
             source: SessionSource::New,

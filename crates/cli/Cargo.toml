@@ -11,10 +11,19 @@ path = "src/main.rs"
 [[bin]]
 name = "defect-mcp-test-server"
 path = "src/bin/mcp_test_server.rs"
+required-features = ["test-servers"]
 
 [[bin]]
 name = "defect-mcp-streamable-http-test-server"
 path = "src/bin/mcp_streamable_http_test_server.rs"
+required-features = ["test-servers"]
+
+[features]
+# 仅给集成测试用：拉起内嵌 MCP server 校验 client/transport round-trip。
+# 主 release bin 不需要——开启后会拖入 rmcp 的完整 server side（schema 派生 +
+# transport-streamable-http-server）以及 axum，二进制至少 +400KB .text。
+# `cargo test -p defect-cli --features test-servers` 显式启用。
+test-servers = ["dep:rmcp", "dep:axum"]
 
 [dependencies]
 defect-acp.workspace = true
@@ -33,10 +42,13 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 serde.workspace = true
 serde_json.workspace = true
-axum = "0.8"
+
+# 仅在 `test-servers` feature 下启用：拖入完整 rmcp server + axum 用于
+# 跑 stdio / streamable-http MCP server 测试桩。
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"], optional = true }
+axum = { version = "0.8", optional = true }
 
 [dev-dependencies]
 futures.workspace = true
@@ -44,3 +56,11 @@ serde_json.workspace = true
 tokio-util.workspace = true
 wiremock.workspace = true
 tempfile.workspace = true
+
+# `mcp_stdio_smoke` 通过 `CARGO_BIN_EXE_*` 拉起两个 test bin，
+# 没启用 `test-servers` feature 时这俩 bin 不会被编译，integration
+# test 也跟着 gate 掉，避免 `env!` 宏在编译期报"未定义 env var"。
+[[test]]
+name = "mcp_stdio_smoke"
+path = "tests/mcp_stdio_smoke.rs"
+required-features = ["test-servers"]

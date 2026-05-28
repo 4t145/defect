@@ -35,7 +35,7 @@
 | internal | 内置工具：fs（read / write / edit）                            | `docs/internal/tools-fs.md`                                             | P0     | ✅ 已完成 |
 | internal | 内置工具：bash 执行                                            | `docs/internal/tools-bash.md`                                           | P0     | ✅ 已完成 |
 | internal | 内置工具：fetch（HTTP GET + html→markdown 渲染）               | `docs/internal/tools-fetch.md`                                          | P1     | ✅ 已完成 |
-| internal | 内置工具：grep / glob 检索                                     | `docs/internal/tools-search.md`                                         | P1     | 🕒 未开始 |
+| internal | 内置工具：grep / glob 检索（统一 `search` tool）               | `docs/internal/tools-search.md`                                         | P1     | ✅ 已完成 |
 | internal | 会话持久化（jsonl，append-only，可 resume）                    | `docs/internal/storage-jsonl.md`                                        | P1     | ✅ 已完成 |
 | internal | Hook 系统（5 件套生命周期 + Builtin/Command/Prompt handler）   | `docs/internal/hooks.md`                                                | P1     | 🕒 未开始 |
 | outbound | LLM 模块两层架构（协议层 + 厂商层）总览                        | `docs/outbound/llm.md`                                                  | P0     | ✅ 已完成 |

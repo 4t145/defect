@@ -351,6 +351,13 @@ impl AgentCore for DefaultAgentCore {
                 request_audit: RequestAuditTracker::new(),
             }) as Arc<dyn Session>;
 
+            let session_info = loaded.info;
+            for observer in &self.observers {
+                observer
+                    .on_session_created(session.clone(), session_info.clone())
+                    .map_err(AgentError::Observer)?;
+            }
+
             self.sessions.insert(id, session.clone());
             Ok(session)
         })

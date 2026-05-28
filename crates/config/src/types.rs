@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use defect_agent::error::BoxError;
-use defect_agent::session::{SearchCapabilityConfig, SessionCapabilitiesConfig, TurnConfig};
+use defect_agent::session::{SessionCapabilitiesConfig, TurnConfig, WebSearchCapabilityConfig};
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
 
@@ -83,8 +83,8 @@ pub enum ConfigWarning {
     /// 配置文件里出现了某段，但在当前 mode 下不会生效。
     ///
     /// 详见 `docs/internal/capabilities.md` §3 的语义对照表。
-    /// 典型场景：`capabilities.search.mode = "delegate"` 时仍写了
-    /// `[tools.search]`——本地 search 不会注册，该段实际不生效。
+    /// 典型场景：写了某段配置但相应能力被关闭（例如旧版 `capabilities.search`
+    /// 段落已被废弃为 `[capabilities.web_search]`，旧键不再生效）。
     InactiveSection {
         path: PathBuf,
         section: String,
@@ -285,26 +285,27 @@ pub enum HookPromptRender {
 ///
 /// 与 [`SessionCapabilitiesConfig`] 形态等价；在 `EffectiveConfig` 上保
 /// 留独立类型是为了未来追加非 session 级 capability 时不动 agent crate。
-/// 当前 P1 仅有 `search`，直接复用 agent 侧的 `SearchCapabilityConfig`。
+/// 当前 P1 仅有 `web_search`（hosted-only），本地 grep/glob 工具不属于
+/// capability 层，由 `[tools.search]` 单独管理。
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CapabilitiesConfig {
-    pub search: SearchCapabilityConfig,
+    pub web_search: WebSearchCapabilityConfig,
 }
 
 impl CapabilitiesConfig {
-    /// 用单条 [`SearchCapabilityConfig`] 构造。跨 crate 调用方需要这个
+    /// 用单条 [`WebSearchCapabilityConfig`] 构造。跨 crate 调用方需要这个
     /// 入口，因为本结构体 `#[non_exhaustive]` 后不能直接 struct literal。
     #[must_use]
-    pub const fn with_search(search: SearchCapabilityConfig) -> Self {
-        Self { search }
+    pub const fn with_web_search(web_search: WebSearchCapabilityConfig) -> Self {
+        Self { web_search }
     }
 
     /// 转成 agent 侧的 [`SessionCapabilitiesConfig`]，供
     /// `DefaultAgentCoreBuilder::capabilities` 直接消费。
     #[must_use]
     pub fn to_session_capabilities(self) -> SessionCapabilitiesConfig {
-        SessionCapabilitiesConfig::with_search(self.search)
+        SessionCapabilitiesConfig::with_web_search(self.web_search)
     }
 }
 
@@ -314,21 +315,21 @@ impl CapabilitiesConfig {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProviderCapabilityOverrides {
-    pub search: Option<SearchCapabilityConfig>,
+    pub web_search: Option<WebSearchCapabilityConfig>,
 }
 
 impl ProviderCapabilityOverrides {
-    /// 用单条 search 覆写构造。`None` = 跟随全局。
+    /// 用单条 web_search 覆写构造。`None` = 跟随全局。
     #[must_use]
-    pub const fn with_search(search: Option<SearchCapabilityConfig>) -> Self {
-        Self { search }
+    pub const fn with_web_search(web_search: Option<WebSearchCapabilityConfig>) -> Self {
+        Self { web_search }
     }
 
     /// 把全局 [`CapabilitiesConfig`] 与本 provider 的覆写合并。
     /// 未覆写字段沿用全局值。
     #[must_use]
     pub fn merge_into(&self, base: CapabilitiesConfig) -> CapabilitiesConfig {
-        CapabilitiesConfig::with_search(self.search.unwrap_or(base.search))
+        CapabilitiesConfig::with_web_search(self.web_search.unwrap_or(base.web_search))
     }
 }
 
@@ -365,6 +366,10 @@ pub struct ToolsConfig {
     pub fs: FsToolConfig,
     /// `[tools.fetch]` 段。预留出来——P1 仅 schema 落地，工具实现在后续 PR。
     pub fetch: FetchToolConfig,
+    /// `[tools.search]` 段。本地 `search` tool（grep/glob）的参数。
+    /// 与 `[capabilities.web_search]` 相互独立，由 `enabled` 单独决定是否注册。
+    /// 详见 `docs/internal/tools-search.md`。
+    pub search: SearchToolConfig,
 }
 
 /// 本地 `fetch` 工具的配置。详见 `docs/internal/tools-fetch.md` §7。
@@ -429,6 +434,33 @@ impl Default for FsToolConfig {
         Self {
             read_default_limit: DEFAULT_FS_READ_LIMIT,
             read_max_limit: DEFAULT_FS_READ_MAX_LIMIT,
+        }
+    }
+}
+
+/// 本地 `search` 工具的配置。详见 `docs/internal/tools-search.md` §7。
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchToolConfig {
+    pub enabled: bool,
+    pub default_head_limit: u32,
+    pub max_head_limit: u32,
+    pub max_file_size_bytes: u64,
+    pub max_result_bytes: u64,
+    pub max_walk_files: u64,
+    pub respect_gitignore_default: bool,
+}
+
+impl Default for SearchToolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_head_limit: 100,
+            max_head_limit: 1000,
+            max_file_size_bytes: 16 * 1024 * 1024,
+            max_result_bytes: 256 * 1024,
+            max_walk_files: 100_000,
+            respect_gitignore_default: true,
         }
     }
 }
@@ -631,17 +663,17 @@ pub(crate) struct ConfigToml {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct CapabilitiesSection {
-    pub(crate) search: Option<SearchCapabilitySection>,
+    pub(crate) web_search: Option<WebSearchCapabilitySection>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct SearchCapabilitySection {
-    pub(crate) mode: Option<defect_agent::session::SearchCapabilityMode>,
+pub(crate) struct WebSearchCapabilitySection {
+    pub(crate) mode: Option<defect_agent::session::WebSearchCapabilityMode>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct ProviderCapabilitiesSection {
-    pub(crate) search: Option<SearchCapabilitySection>,
+    pub(crate) web_search: Option<WebSearchCapabilitySection>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -716,13 +748,20 @@ pub(crate) struct ToolsSection {
     pub(crate) bash: Option<BashToolSection>,
     pub(crate) fs: Option<FsToolSection>,
     pub(crate) fetch: Option<FetchToolSection>,
-    /// `[tools.search]`：mode = local 时本地实现的参数。P1 仅识别段，
-    /// 不强 schema——具体字段在 search tool 落地 PR 里再细化。是否生效
-    /// 由 `loader::collect_inactive_section_warnings` 在合并后从 raw
-    /// TomlValue 上判断；这个字段只是为了让 `serde::deserialize` 把段读掉，
-    /// 避免 `UnknownKey` warning，它本身不需要被消费。
-    #[allow(dead_code)]
-    pub(crate) search: Option<TomlValue>,
+    /// `[tools.search]`：本地 `search` tool（grep/glob）参数。是否注册仅
+    /// 取决于 `enabled`，与 `[capabilities.web_search]` 完全独立。
+    pub(crate) search: Option<SearchToolSection>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct SearchToolSection {
+    pub(crate) enabled: Option<bool>,
+    pub(crate) default_head_limit: Option<u32>,
+    pub(crate) max_head_limit: Option<u32>,
+    pub(crate) max_file_size_bytes: Option<u64>,
+    pub(crate) max_result_bytes: Option<u64>,
+    pub(crate) max_walk_files: Option<u64>,
+    pub(crate) respect_gitignore_default: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

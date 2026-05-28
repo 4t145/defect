@@ -16,6 +16,11 @@ tokio = { workspace = true, features = ["process", "io-util", "time", "macros", 
 tokio-util.workspace = true
 tracing.workspace = true
 htmd.workspace = true
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-matcher = "0.1"
+grep-regex = "0.1"
+globset = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "io-util", "time", "macros", "sync", "rt", "rt-multi-thread", "test-util"] }

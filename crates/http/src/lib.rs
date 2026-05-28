@@ -32,6 +32,8 @@ mod user_agent;
 pub use fetch::{
     FetchHttpClient, build_default_fetch_client_arc, build_fetch_client, build_fetch_client_arc,
 };
+pub use proxy::{ProxyAwareConnector, build_proxy_connector};
+pub use user_agent::default_user_agent;
 
 /// `build_http_stack` 输出的类型擦除 service。
 ///

@@ -29,6 +29,10 @@ use rmcp::transport::{
     StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
 };
 use rmcp::{ClientHandler, ServiceExt};
+
+use crate::streamable_http::HyperStreamableHttpClient;
+
+mod streamable_http;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -179,7 +183,13 @@ async fn load_streamable_http_server_tools(
     url: String,
     headers: Vec<agent_client_protocol::schema::HttpHeader>,
 ) -> Result<Vec<Arc<dyn Tool>>, BoxError> {
-    let transport = StreamableHttpClientTransport::from_config(
+    let http_client =
+        HyperStreamableHttpClient::from_stack_config(&defect_http::HttpStackConfig::default())
+            .map_err(|e| {
+                BoxError::new(McpAdapterError::Initialize(io::Error::other(e.to_string())))
+            })?;
+    let transport = StreamableHttpClientTransport::with_client(
+        http_client,
         StreamableHttpClientTransportConfig::with_uri(url).custom_headers(http_headers(headers)?),
     );
     let client = EmptyClient.serve(transport).await.map_err(service_error)?;

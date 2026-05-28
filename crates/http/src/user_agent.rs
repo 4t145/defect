@@ -18,7 +18,7 @@ use tower::{Layer, Service};
 /// `DEFECT_HTTP_GIT_SHA` 由 `build.rs` 注入：优先读 build-time 环境变量
 /// `DEFECT_HTTP_BUILD_SHA`（用于无 `.git` 的下游打包场景），其次跑
 /// `git rev-parse`，都拿不到时退化为 `"unknown"`。
-pub(crate) fn default_user_agent() -> HeaderValue {
+pub fn default_user_agent() -> HeaderValue {
     let pkg = env!("CARGO_PKG_VERSION");
     let sha = env!("DEFECT_HTTP_GIT_SHA");
     let raw = format!("defect-http/{pkg} ({sha})");

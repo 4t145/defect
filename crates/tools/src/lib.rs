@@ -8,9 +8,11 @@
 pub mod bash;
 pub mod fetch;
 pub mod fs;
+pub mod search;
 pub mod shell;
 
 pub use bash::BashTool;
 pub use fetch::FetchTool;
 pub use fs::{EditFileTool, LocalFsBackend, ReadFileTool, WriteFileTool};
+pub use search::SearchTool;
 pub use shell::LocalShellBackend;

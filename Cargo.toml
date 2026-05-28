@@ -8,7 +8,8 @@ default-members = ["crates/*"]
 opt-level = "s"       # 体积优先（比 "z" 温和，不会激进到影响性能热点）
 lto = "thin"          # ThinLTO：体积收益明显，编译时间可控
 codegen-units = 1     # 单 CGU 让 LLVM 做跨函数内联/死代码消除
-strip = "debuginfo"  # 去掉 DWARF，保留符号表（panic 栈还能看到函数名）
+# strip = "debuginfo"  # 去掉 DWARF，保留符号表（panic 栈还能看到函数名）
+strip = "symbols"    # 最小体积优化
 
 [workspace.package]
 edition = "2024"
@@ -53,7 +54,6 @@ arc-swap = "1"
 # 协议与外部 SDK
 agent-client-protocol = "0.12"
 rmcp = { version = "1", features = ["client"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "rustls-native-certs", "stream", "http2"] }
 
 # LLM 客户端栈：toac codegen + 运行期 + hyper transport
 # toac / toac-build 锁 git rev，等仓库稳定后改 crates.io 版本号

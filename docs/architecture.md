@@ -108,8 +108,10 @@ crates/
 
 - `docs/internal/event-model.md` —— 事件流模型
 - `docs/internal/llm-trait.md` —— `LlmProvider` trait 形状
+- `docs/internal/storage-jsonl.md` —— 会话持久化、恢复 journal 与 snapshot 设计
 - `docs/internal/tool-trait.md` —— `Tool` trait 形状（含权限钩子时机）
 - `docs/internal/turn-loop.md` —— 主循环编排
+- `docs/internal/workspace-checkpoints.md` —— prompt turn 的 git checkpoint 与 workspace 回滚设计
 - `docs/inbound/acp-handshake.md` —— ACP 握手与能力协商
 - `docs/outbound/llm-anthropic.md` —— Anthropic provider 落地
 

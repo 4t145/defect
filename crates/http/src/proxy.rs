@@ -28,7 +28,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use super::{HttpStackError, ProxyConfig, ProxySettings};
 
 /// 完整连接器类型——上层用这个类型构造 [`hyper_util::client::legacy::Client`]。
-pub(crate) type ProxyAwareConnector = hyper_rustls::HttpsConnector<ProxyConnector<HttpConnector>>;
+pub type ProxyAwareConnector = hyper_rustls::HttpsConnector<ProxyConnector<HttpConnector>>;
 
 /// 从 [`ProxyConfig`] 构造完整连接器。
 ///
@@ -37,9 +37,11 @@ pub(crate) type ProxyAwareConnector = hyper_rustls::HttpsConnector<ProxyConnecto
 /// - `FromEnv` → 读 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（大小写
 ///   都接受，小写优先，对齐 curl 习惯）。
 /// - `Explicit` → 直接用给定值。
-pub(crate) fn build_proxy_connector(
-    config: &ProxyConfig,
-) -> Result<ProxyAwareConnector, HttpStackError> {
+///
+/// # Errors
+///
+/// 加载 native TLS roots 失败、或 env 中代理 URL 解析失败时返回。
+pub fn build_proxy_connector(config: &ProxyConfig) -> Result<ProxyAwareConnector, HttpStackError> {
     let entries = resolve_proxy(config)?;
 
     // ⚠ 必须 `enforce_http(false)`：默认 `HttpConnector` 拒绝 https scheme，

@@ -6,8 +6,9 @@ license.workspace = true
 
 [dependencies]
 defect-agent.workspace = true
+defect-http.workspace = true
 agent-client-protocol.workspace = true
-rmcp = { workspace = true, features = ["client", "server", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client"] }
 tokio.workspace = true
 futures.workspace = true
 serde.workspace = true
@@ -15,6 +16,11 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+bytes.workspace = true
+sse-stream.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

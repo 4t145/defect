@@ -10,10 +10,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use defect_agent::hooks::builtin::BuiltinRegistry;
 use defect_agent::hooks::{
     DefaultHookEngine, HandlerEntry, HandlerTable, HookEventKind, HookMatcher as AgentHookMatcher,
 };
-use defect_agent::hooks::builtin::BuiltinRegistry;
 use defect_config::{
     HookCommandSpec, HookEntry, HookHandlerSpec, HookMatcher as ConfigHookMatcher, HooksConfig,
 };
@@ -90,10 +90,7 @@ fn push_bucket(
         let (handler, timeout) = match &entry.handler {
             HookHandlerSpec::Builtin { name } => {
                 let handler = builtins.lookup(name).ok_or_else(|| {
-                    let available = builtins
-                        .names()
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let available = builtins.names().collect::<Vec<_>>().join(", ");
                     HookEngineBuildError::UnknownBuiltin {
                         name: name.clone(),
                         available,

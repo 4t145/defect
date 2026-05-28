@@ -22,5 +22,5 @@ pub use types::{
     HttpProxySettings, LoadConfigOptions, LoadedConfig, McpConfig, McpRemoteServerConfig,
     McpServerConfig, McpStdioServerConfig, OpenAiConfigFile, OtlpTracingConfig, PromptConfigFile,
     ProviderCapabilityOverrides, ProviderConfigs, ProviderKind, SandboxConfig, SandboxMode,
-    ToolsConfig, TracingConfig,
+    SearchToolConfig, ToolsConfig, TracingConfig,
 };

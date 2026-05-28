@@ -76,11 +76,12 @@ pub enum FeatureSupport {
 /// 与 [`Capabilities`] 区分：
 /// - [`Capabilities`] 描述模型能力（thinking / vision / tool_calls 等）
 /// - [`HostedCapabilities`] 描述 provider adapter 自身实现状态：当前
-///   adapter 能不能在 wire 上声明 hosted search / fetch / code_execution
+///   adapter 能不能在 wire 上声明 hosted web_search / fetch / code_execution
 ///
 /// session 启动期通过 [`super::LlmProvider::hosted_capabilities`] 拿到
-/// 此结构，与 `capabilities.search.mode` 一起决定本 session 的 search
-/// 能力来源。
+/// 此结构，与 `capabilities.web_search.mode` 一起决定本 session 的 web
+/// search 能力来源。注意：本地 grep/glob 工具（`search` tool）不属于
+/// capability 层，由 `[tools.search]` 单独管理。
 ///
 /// 设计详见 `docs/internal/capabilities.md` §4。
 #[non_exhaustive]
@@ -91,14 +92,14 @@ pub struct HostedCapabilities {
     /// 当前 hosted tool 版本由 adapter 内部硬编码取最新（Anthropic
     /// `web_search_20260209`、OpenAI Responses API `web_search`）；
     /// agent 不感知具体版本字段。
-    pub search: bool,
+    pub web_search: bool,
 }
 
 impl HostedCapabilities {
     /// 用单个字段构造。跨 crate 的测试或 adapter 实现需要这个入口，
     /// 因为本结构体 `#[non_exhaustive]` 后不能直接 struct literal。
     #[must_use]
-    pub const fn with_search(search: bool) -> Self {
-        Self { search }
+    pub const fn with_web_search(web_search: bool) -> Self {
+        Self { web_search }
     }
 }

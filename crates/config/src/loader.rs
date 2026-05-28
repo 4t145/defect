@@ -22,9 +22,10 @@ use crate::types::{
     HooksConfig, HttpClientConfig, HttpProxyConfig, HttpProxySettings, LoadConfigOptions,
     LoadedConfig, OpenAiConfigFile, OtlpTracingConfig, PROJECT_CONFIG_RELATIVE,
     PROJECT_LOCAL_CONFIG_RELATIVE, PromptConfigFile, ProviderCapabilityOverrides, ProviderConfigs,
-    ProviderKind, SandboxConfig, SandboxMode, ToolsConfig, TracingConfig, USER_CONFIG_RELATIVE,
+    ProviderKind, SandboxConfig, SandboxMode, SearchToolConfig, ToolsConfig, TracingConfig,
+    USER_CONFIG_RELATIVE,
 };
-use defect_agent::session::SearchCapabilityConfig;
+use defect_agent::session::WebSearchCapabilityConfig;
 
 /// 加载并合并 `defect` 的有效配置。
 ///
@@ -147,7 +148,6 @@ pub fn load_config(opts: LoadConfigOptions) -> Result<LoadedConfig, ConfigError>
         base_prompt.unwrap_or_default(),
         hooks,
     )?;
-    collect_inactive_section_warnings(&merged, &effective.capabilities, &mut warnings);
 
     Ok(LoadedConfig {
         layers: ConfigLayerStack { layers },
@@ -288,10 +288,10 @@ fn build_effective_config(
         // 保持 default sampling 显式落在 effective config 中，方便后续扩字段。
     }
 
-    let capabilities = CapabilitiesConfig::with_search(SearchCapabilityConfig::new(
+    let capabilities = CapabilitiesConfig::with_web_search(WebSearchCapabilityConfig::new(
         config
             .capabilities
-            .search
+            .web_search
             .as_ref()
             .and_then(|s| s.mode)
             .unwrap_or_default(),
@@ -320,6 +320,29 @@ fn build_effective_config(
                 .unwrap_or(fetch_default.follow_redirects),
         })
         .unwrap_or(fetch_default);
+
+    let search_default = SearchToolConfig::default();
+    let search = config
+        .tools
+        .search
+        .map(|cfg| SearchToolConfig {
+            enabled: cfg.enabled.unwrap_or(search_default.enabled),
+            default_head_limit: cfg
+                .default_head_limit
+                .unwrap_or(search_default.default_head_limit),
+            max_head_limit: cfg.max_head_limit.unwrap_or(search_default.max_head_limit),
+            max_file_size_bytes: cfg
+                .max_file_size_bytes
+                .unwrap_or(search_default.max_file_size_bytes),
+            max_result_bytes: cfg
+                .max_result_bytes
+                .unwrap_or(search_default.max_result_bytes),
+            max_walk_files: cfg.max_walk_files.unwrap_or(search_default.max_walk_files),
+            respect_gitignore_default: cfg
+                .respect_gitignore_default
+                .unwrap_or(search_default.respect_gitignore_default),
+        })
+        .unwrap_or(search_default);
 
     Ok(EffectiveConfig {
         cli: CliConfig { provider, model },
@@ -379,6 +402,7 @@ fn build_effective_config(
                 })
                 .unwrap_or_default(),
             fetch,
+            search,
         },
         sandbox: SandboxConfig {
             mode: config.sandbox.mode.unwrap_or(SandboxMode::AskWrites),
@@ -421,49 +445,13 @@ fn provider_capability_overrides(
     let Some(section) = section else {
         return ProviderCapabilityOverrides::default();
     };
-    ProviderCapabilityOverrides::with_search(
+    ProviderCapabilityOverrides::with_web_search(
         section
-            .search
+            .web_search
             .as_ref()
             .and_then(|s| s.mode)
-            .map(SearchCapabilityConfig::new),
+            .map(WebSearchCapabilityConfig::new),
     )
-}
-
-/// 在 `[capabilities.search]` 与 `[tools.search]` 段共存时按
-/// `docs/internal/capabilities.md` §3 的语义对照表发
-/// `ConfigWarning::InactiveSection`。注意：仅在 mode = `delegate` /
-/// `disabled` 时发；mode = `local` 时 `[tools.search]` 是正常的本地实现
-/// 参数。
-fn collect_inactive_section_warnings(
-    merged: &TomlValue,
-    capabilities: &CapabilitiesConfig,
-    warnings: &mut Vec<ConfigWarning>,
-) {
-    use defect_agent::session::SearchCapabilityMode;
-
-    let has_tools_search = merged
-        .get("tools")
-        .and_then(TomlValue::as_table)
-        .map(|t| t.contains_key("search"))
-        .unwrap_or(false);
-    if !has_tools_search {
-        return;
-    }
-    let mode = capabilities.search.mode;
-    // `#[non_exhaustive]` 上来的兜底：未来追加 mode 时默认按 inactive 提示，
-    // 让用户至少看到一条 warning，再按需细化。
-    let mode_label = match mode {
-        SearchCapabilityMode::Local => return,
-        SearchCapabilityMode::Delegate => "delegate",
-        SearchCapabilityMode::Disabled => "disabled",
-        _ => "unknown",
-    };
-    warnings.push(ConfigWarning::InactiveSection {
-        path: PathBuf::from("<merged>"),
-        section: "tools.search".into(),
-        reason: format!("capabilities.search.mode = \"{mode_label}\""),
-    });
 }
 
 fn sanitize_shared_project_layer(
@@ -649,21 +637,21 @@ fn is_known_config_key(key: &str) -> bool {
             | "turn.compact_threshold_tokens"
             | "turn.max_llm_retries"
             | "turn.max_concurrent_tools"
-            | "capabilities.search.mode"
+            | "capabilities.web_search.mode"
             | "providers.anthropic.base_url"
             | "providers.anthropic.default_model"
             | "providers.anthropic.models"
-            | "providers.anthropic.capabilities.search.mode"
+            | "providers.anthropic.capabilities.web_search.mode"
             | "providers.openai.base_url"
             | "providers.openai.default_model"
             | "providers.openai.models"
             | "providers.openai.organization"
             | "providers.openai.project"
-            | "providers.openai.capabilities.search.mode"
+            | "providers.openai.capabilities.web_search.mode"
             | "providers.deepseek.base_url"
             | "providers.deepseek.default_model"
             | "providers.deepseek.models"
-            | "providers.deepseek.capabilities.search.mode"
+            | "providers.deepseek.capabilities.web_search.mode"
             | "tools.bash.default_timeout_ms"
             | "tools.bash.max_timeout_ms"
             | "tools.fs.read_default_limit"
@@ -675,6 +663,13 @@ fn is_known_config_key(key: &str) -> bool {
             | "tools.fetch.default_format"
             | "tools.fetch.html_to_markdown"
             | "tools.fetch.follow_redirects"
+            | "tools.search.enabled"
+            | "tools.search.default_head_limit"
+            | "tools.search.max_head_limit"
+            | "tools.search.max_file_size_bytes"
+            | "tools.search.max_result_bytes"
+            | "tools.search.max_walk_files"
+            | "tools.search.respect_gitignore_default"
             | "sandbox.mode"
             | "tracing.filter"
             | "tracing.otlp.endpoint"
@@ -688,16 +683,7 @@ fn is_known_config_key(key: &str) -> bool {
             | "http.proxy.https_proxy"
             | "http.proxy.no_proxy"
     ) || is_known_mcp_key(key)
-        || is_known_tools_search_key(key)
         || is_known_hooks_key(key)
-}
-
-/// `[tools.search]` 段的 schema 在 P1 还没敲定（本地 `search` tool 实现
-/// 待后续 PR；详见 `docs/internal/capabilities.md` §10）；这里把整段
-/// 视为已知，避免每个未来字段都触发 `UnknownKey`。当 mode != `local`
-/// 时由 `InactiveSection` warning 提示用户该段实际不会生效。
-fn is_known_tools_search_key(key: &str) -> bool {
-    key == "tools.search" || key.starts_with("tools.search.")
 }
 
 /// `[hooks]` 段是数组+联合体的混合形态——逐键枚举意义不大，且字段会随
@@ -716,17 +702,17 @@ fn is_known_config_prefix(key: &str) -> bool {
             | "prompt"
             | "turn"
             | "capabilities"
-            | "capabilities.search"
+            | "capabilities.web_search"
             | "providers"
             | "providers.anthropic"
             | "providers.anthropic.capabilities"
-            | "providers.anthropic.capabilities.search"
+            | "providers.anthropic.capabilities.web_search"
             | "providers.openai"
             | "providers.openai.capabilities"
-            | "providers.openai.capabilities.search"
+            | "providers.openai.capabilities.web_search"
             | "providers.deepseek"
             | "providers.deepseek.capabilities"
-            | "providers.deepseek.capabilities.search"
+            | "providers.deepseek.capabilities.web_search"
             | "tools"
             | "tools.bash"
             | "tools.fs"

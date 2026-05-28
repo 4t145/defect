@@ -14,8 +14,8 @@ use defect_agent::llm::{
     ProtocolId, ProviderError, ProviderInfo, ProviderStream, ThinkingEcho,
 };
 use defect_agent::session::{
-    AgentCore, AgentError, DefaultAgentCore, SearchCapabilityConfig, SearchCapabilityMode,
-    SessionCapabilitiesConfig, SessionInitError, TurnConfig, uuid_like,
+    AgentCore, AgentError, DefaultAgentCore, SessionCapabilitiesConfig, SessionInitError,
+    TurnConfig, WebSearchCapabilityConfig, WebSearchCapabilityMode, uuid_like,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use futures::future::BoxFuture;
@@ -32,7 +32,7 @@ fn unsupported_caps() -> Capabilities {
     }
 }
 
-/// hosted search 不支持的 provider。
+/// hosted web_search 不支持的 provider。
 struct NoHostedProvider;
 impl LlmProvider for NoHostedProvider {
     fn info(&self) -> ProviderInfo {
@@ -60,21 +60,21 @@ impl LlmProvider for NoHostedProvider {
     }
 }
 
-/// hosted search 支持的 provider。
+/// hosted web_search 支持的 provider。
 struct HostedSearchProvider;
 impl LlmProvider for HostedSearchProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             vendor: "hosted".to_string(),
             protocol: ProtocolId::AnthropicMessages,
-            display_name: "Hosted Search Provider".to_string(),
+            display_name: "Hosted Web Search Provider".to_string(),
         }
     }
     fn capabilities(&self) -> Capabilities {
         unsupported_caps()
     }
     fn hosted_capabilities(&self) -> HostedCapabilities {
-        HostedCapabilities::with_search(true)
+        HostedCapabilities::with_web_search(true)
     }
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
         Box::pin(async { Ok(Vec::new()) })
@@ -109,8 +109,8 @@ fn build_core(
 async fn delegate_with_unsupported_provider_fails_session_init() {
     let core = build_core(
         Arc::new(NoHostedProvider) as Arc<dyn LlmProvider>,
-        SessionCapabilitiesConfig::with_search(SearchCapabilityConfig::new(
-            SearchCapabilityMode::Delegate,
+        SessionCapabilitiesConfig::with_web_search(WebSearchCapabilityConfig::new(
+            WebSearchCapabilityMode::Delegate,
         )),
     );
 
@@ -131,7 +131,7 @@ async fn delegate_with_unsupported_provider_fails_session_init() {
             capability,
             provider,
         })) => {
-            assert_eq!(capability, "search");
+            assert_eq!(capability, "web_search");
             assert_eq!(provider, "no-hosted");
         }
         Err(other) => panic!("unexpected error: {other:?}"),
@@ -142,8 +142,8 @@ async fn delegate_with_unsupported_provider_fails_session_init() {
 async fn delegate_with_supported_provider_creates_session() {
     let core = build_core(
         Arc::new(HostedSearchProvider) as Arc<dyn LlmProvider>,
-        SessionCapabilitiesConfig::with_search(SearchCapabilityConfig::new(
-            SearchCapabilityMode::Delegate,
+        SessionCapabilitiesConfig::with_web_search(WebSearchCapabilityConfig::new(
+            WebSearchCapabilityMode::Delegate,
         )),
     );
 
@@ -166,31 +166,6 @@ async fn delegate_with_supported_provider_creates_session() {
 }
 
 #[tokio::test]
-async fn local_mode_succeeds_regardless_of_provider() {
-    for provider in [
-        Arc::new(NoHostedProvider) as Arc<dyn LlmProvider>,
-        Arc::new(HostedSearchProvider) as Arc<dyn LlmProvider>,
-    ] {
-        let core = build_core(
-            provider,
-            SessionCapabilitiesConfig::with_search(SearchCapabilityConfig::new(
-                SearchCapabilityMode::Local,
-            )),
-        );
-        let cwd = std::env::current_dir().expect("cwd");
-        core.create_session(
-            SessionId::new(uuid_like()),
-            cwd,
-            vec![],
-            Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
-            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
-        )
-        .await
-        .expect("local mode should always succeed");
-    }
-}
-
-#[tokio::test]
 async fn disabled_mode_succeeds_regardless_of_provider() {
     for provider in [
         Arc::new(NoHostedProvider) as Arc<dyn LlmProvider>,
@@ -198,8 +173,8 @@ async fn disabled_mode_succeeds_regardless_of_provider() {
     ] {
         let core = build_core(
             provider,
-            SessionCapabilitiesConfig::with_search(SearchCapabilityConfig::new(
-                SearchCapabilityMode::Disabled,
+            SessionCapabilitiesConfig::with_web_search(WebSearchCapabilityConfig::new(
+                WebSearchCapabilityMode::Disabled,
             )),
         );
         let cwd = std::env::current_dir().expect("cwd");

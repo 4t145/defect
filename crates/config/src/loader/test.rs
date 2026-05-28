@@ -9,7 +9,7 @@ use crate::types::{
     CliOverrides, ConfigError, ConfigSource, ConfigWarning, HookCommandSpec, HookHandlerSpec,
     HttpProxyMode, LoadConfigOptions, PROJECT_LOCAL_CONFIG_RELATIVE, ProviderKind,
 };
-use defect_agent::session::SearchCapabilityMode;
+use defect_agent::session::WebSearchCapabilityMode;
 use defect_agent::tool::SafetyClass;
 
 fn test_options(root: &TempDir) -> LoadConfigOptions {
@@ -568,7 +568,7 @@ mode = "disabled"
 }
 
 #[test]
-fn capabilities_search_default_is_local() {
+fn capabilities_web_search_default_is_disabled() {
     let tmp = TempDir::new().expect("tmp");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(repo.join(".git")).expect("git");
@@ -576,8 +576,8 @@ fn capabilities_search_default_is_local() {
     let loaded = load_config(test_options(&tmp)).expect("load config");
 
     assert_eq!(
-        loaded.effective.capabilities.search.mode,
-        SearchCapabilityMode::Local
+        loaded.effective.capabilities.web_search.mode,
+        WebSearchCapabilityMode::Disabled
     );
     // 三个 provider 的覆写默认为 None（未声明覆写）。
     assert!(
@@ -586,7 +586,7 @@ fn capabilities_search_default_is_local() {
             .providers
             .anthropic
             .capabilities
-            .search
+            .web_search
             .is_none()
     );
     assert!(
@@ -595,7 +595,7 @@ fn capabilities_search_default_is_local() {
             .providers
             .openai
             .capabilities
-            .search
+            .web_search
             .is_none()
     );
     assert!(
@@ -604,17 +604,16 @@ fn capabilities_search_default_is_local() {
             .providers
             .deepseek
             .capabilities
-            .search
+            .web_search
             .is_none()
     );
 }
 
 #[test]
-fn capabilities_search_mode_parses_three_values() {
+fn capabilities_web_search_mode_parses_two_values() {
     for (value, expected) in [
-        ("delegate", SearchCapabilityMode::Delegate),
-        ("local", SearchCapabilityMode::Local),
-        ("disabled", SearchCapabilityMode::Disabled),
+        ("delegate", WebSearchCapabilityMode::Delegate),
+        ("disabled", WebSearchCapabilityMode::Disabled),
     ] {
         let tmp = TempDir::new().expect("tmp");
         let repo = tmp.path().join("repo");
@@ -623,7 +622,7 @@ fn capabilities_search_mode_parses_three_values() {
             &tmp.path().join("xdg/defect/config.toml"),
             &format!(
                 r#"
-[capabilities.search]
+[capabilities.web_search]
 mode = "{value}"
 "#
             ),
@@ -631,7 +630,7 @@ mode = "{value}"
 
         let loaded = load_config(test_options(&tmp)).expect("load config");
         assert_eq!(
-            loaded.effective.capabilities.search.mode, expected,
+            loaded.effective.capabilities.web_search.mode, expected,
             "mode = {value}"
         );
     }
@@ -645,25 +644,25 @@ fn provider_capability_overrides_are_loaded() {
     write(
         &tmp.path().join("xdg/defect/config.toml"),
         r#"
-[capabilities.search]
-mode = "local"
+[capabilities.web_search]
+mode = "disabled"
 
-[providers.anthropic.capabilities.search]
+[providers.anthropic.capabilities.web_search]
 mode = "delegate"
 
-[providers.openai.capabilities.search]
+[providers.openai.capabilities.web_search]
 mode = "delegate"
 
-[providers.deepseek.capabilities.search]
-mode = "local"
+[providers.deepseek.capabilities.web_search]
+mode = "disabled"
 "#,
     );
 
     let loaded = load_config(test_options(&tmp)).expect("load config");
 
     assert_eq!(
-        loaded.effective.capabilities.search.mode,
-        SearchCapabilityMode::Local
+        loaded.effective.capabilities.web_search.mode,
+        WebSearchCapabilityMode::Disabled
     );
     assert_eq!(
         loaded
@@ -671,9 +670,9 @@ mode = "local"
             .providers
             .anthropic
             .capabilities
-            .search
+            .web_search
             .map(|s| s.mode),
-        Some(SearchCapabilityMode::Delegate)
+        Some(WebSearchCapabilityMode::Delegate)
     );
     assert_eq!(
         loaded
@@ -681,9 +680,9 @@ mode = "local"
             .providers
             .openai
             .capabilities
-            .search
+            .web_search
             .map(|s| s.mode),
-        Some(SearchCapabilityMode::Delegate)
+        Some(WebSearchCapabilityMode::Delegate)
     );
     assert_eq!(
         loaded
@@ -691,9 +690,9 @@ mode = "local"
             .providers
             .deepseek
             .capabilities
-            .search
+            .web_search
             .map(|s| s.mode),
-        Some(SearchCapabilityMode::Local)
+        Some(WebSearchCapabilityMode::Disabled)
     );
 }
 
@@ -705,11 +704,11 @@ fn provider_capability_override_merge_falls_back_to_global() {
     write(
         &tmp.path().join("xdg/defect/config.toml"),
         r#"
-[capabilities.search]
+[capabilities.web_search]
 mode = "delegate"
 
-[providers.deepseek.capabilities.search]
-mode = "local"
+[providers.deepseek.capabilities.web_search]
+mode = "disabled"
 "#,
     );
 
@@ -724,11 +723,11 @@ mode = "local"
         .merge_into(loaded.effective.capabilities)
         .to_session_capabilities();
     assert_eq!(
-        anthropic_session.search.mode,
-        SearchCapabilityMode::Delegate
+        anthropic_session.web_search.mode,
+        WebSearchCapabilityMode::Delegate
     );
 
-    // DeepSeek 覆写为 local，应当压过全局 delegate。
+    // DeepSeek 覆写为 disabled，应当压过全局 delegate。
     let deepseek_session = loaded
         .effective
         .providers
@@ -736,120 +735,9 @@ mode = "local"
         .capabilities
         .merge_into(loaded.effective.capabilities)
         .to_session_capabilities();
-    assert_eq!(deepseek_session.search.mode, SearchCapabilityMode::Local);
-}
-
-#[test]
-fn tools_search_section_inactive_under_delegate_emits_warning() {
-    let tmp = TempDir::new().expect("tmp");
-    let repo = tmp.path().join("repo");
-    fs::create_dir_all(repo.join(".git")).expect("git");
-    write(
-        &tmp.path().join("xdg/defect/config.toml"),
-        r#"
-[capabilities.search]
-mode = "delegate"
-
-[tools.search]
-default_max_results = 8
-"#,
-    );
-
-    let loaded = load_config(test_options(&tmp)).expect("load config");
-
-    assert!(
-        loaded.warnings.iter().any(|warning| matches!(
-            warning,
-            ConfigWarning::InactiveSection { section, reason, .. }
-                if section == "tools.search"
-                    && reason.contains("delegate")
-        )),
-        "expected InactiveSection warning; got {:?}",
-        loaded.warnings,
-    );
-}
-
-#[test]
-fn tools_search_section_inactive_under_disabled_emits_warning() {
-    let tmp = TempDir::new().expect("tmp");
-    let repo = tmp.path().join("repo");
-    fs::create_dir_all(repo.join(".git")).expect("git");
-    write(
-        &tmp.path().join("xdg/defect/config.toml"),
-        r#"
-[capabilities.search]
-mode = "disabled"
-
-[tools.search]
-default_max_results = 8
-"#,
-    );
-
-    let loaded = load_config(test_options(&tmp)).expect("load config");
-
-    assert!(
-        loaded.warnings.iter().any(|warning| matches!(
-            warning,
-            ConfigWarning::InactiveSection { section, reason, .. }
-                if section == "tools.search"
-                    && reason.contains("disabled")
-        )),
-        "expected InactiveSection warning; got {:?}",
-        loaded.warnings,
-    );
-}
-
-#[test]
-fn tools_search_section_active_under_local_no_warning() {
-    let tmp = TempDir::new().expect("tmp");
-    let repo = tmp.path().join("repo");
-    fs::create_dir_all(repo.join(".git")).expect("git");
-    write(
-        &tmp.path().join("xdg/defect/config.toml"),
-        r#"
-[capabilities.search]
-mode = "local"
-
-[tools.search]
-default_max_results = 8
-"#,
-    );
-
-    let loaded = load_config(test_options(&tmp)).expect("load config");
-
-    assert!(
-        !loaded.warnings.iter().any(|warning| matches!(
-            warning,
-            ConfigWarning::InactiveSection { section, .. } if section == "tools.search"
-        )),
-        "should NOT emit InactiveSection under mode=local; got {:?}",
-        loaded.warnings,
-    );
-}
-
-#[test]
-fn no_inactive_section_warning_when_tools_search_absent() {
-    // mode != local 也不应在 [tools.search] 缺席时硬发 warning。
-    let tmp = TempDir::new().expect("tmp");
-    let repo = tmp.path().join("repo");
-    fs::create_dir_all(repo.join(".git")).expect("git");
-    write(
-        &tmp.path().join("xdg/defect/config.toml"),
-        r#"
-[capabilities.search]
-mode = "delegate"
-"#,
-    );
-
-    let loaded = load_config(test_options(&tmp)).expect("load config");
-
-    assert!(
-        !loaded.warnings.iter().any(|warning| matches!(
-            warning,
-            ConfigWarning::InactiveSection { section, .. } if section == "tools.search"
-        )),
-        "should NOT emit InactiveSection when [tools.search] absent; got {:?}",
-        loaded.warnings,
+    assert_eq!(
+        deepseek_session.web_search.mode,
+        WebSearchCapabilityMode::Disabled
     );
 }
 

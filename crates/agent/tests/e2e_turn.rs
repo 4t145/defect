@@ -9,6 +9,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use agent_client_protocol::schema::SessionId;
 use agent_client_protocol::schema::{
@@ -24,7 +25,7 @@ use defect_agent::llm::{
 use defect_agent::policy::{AskWritesPolicy, OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
     AgentCore, DefaultAgentCore, LoadedSession, Session, SessionCreateInfo, SessionLoader,
-    StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
+    SessionObserver, StaticToolRegistry, ToolRegistry, TurnConfig, uuid_like,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{
@@ -157,6 +158,10 @@ struct StubLoader {
     loaded: LoadedSession,
 }
 
+struct CountingObserver {
+    count: Arc<AtomicUsize>,
+}
+
 impl SessionLoader for StubLoader {
     fn load_session(
         &self,
@@ -164,6 +169,17 @@ impl SessionLoader for StubLoader {
     ) -> BoxFuture<'_, Result<LoadedSession, defect_agent::error::BoxError>> {
         let loaded = self.loaded.clone();
         Box::pin(async move { Ok(loaded) })
+    }
+}
+
+impl SessionObserver for CountingObserver {
+    fn on_session_created(
+        &self,
+        _session: Arc<dyn Session>,
+        _info: SessionCreateInfo,
+    ) -> Result<(), defect_agent::error::BoxError> {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 }
 
@@ -426,6 +442,45 @@ async fn load_session_restores_history_for_next_turn() {
         .expect("turn");
 
     assert!(matches!(stop, StopReason::EndTurn));
+}
+
+#[tokio::test]
+async fn load_session_triggers_observers() {
+    let provider = Arc::new(ScriptedProvider::new()) as Arc<dyn LlmProvider>;
+    let loaded = LoadedSession {
+        info: SessionCreateInfo {
+            id: SessionId::new(uuid_like()),
+            cwd: std::env::current_dir().expect("cwd"),
+            mcp_servers: Vec::new(),
+        },
+        history: Vec::new(),
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+
+    let core = DefaultAgentCore::builder()
+        .provider(provider)
+        .session_loader(Arc::new(StubLoader {
+            loaded: loaded.clone(),
+        }))
+        .observe_session(Arc::new(CountingObserver {
+            count: count.clone(),
+        }))
+        .config(TurnConfig {
+            model: "scripted-001".to_string(),
+            ..TurnConfig::default()
+        })
+        .build();
+
+    let _session = core
+        .load_session(
+            loaded.info.id.clone(),
+            Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
+            Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+        )
+        .await
+        .expect("load session");
+
+    assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 
 /// 用 `AskWritesPolicy`（默认）+ Mutating 工具走 Ask 路径。

@@ -11,9 +11,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use serde_json::{Map, Value};
 
-use super::{
-    HookCapability, HookCtx, HookError, HookEvent, HookHandler, HookOutcome, HookPatch,
-};
+use super::{HookCapability, HookCtx, HookError, HookEvent, HookHandler, HookOutcome, HookPatch};
 
 /// Builtin handler 的注册表：name → 工厂闭包。
 ///
@@ -195,7 +193,9 @@ fn redact_object(obj: &Map<String, Value>) -> Redacted {
 
 fn key_is_secret(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
-    SECRET_KEY_NEEDLES.iter().any(|needle| lower.contains(needle))
+    SECRET_KEY_NEEDLES
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 #[cfg(test)]

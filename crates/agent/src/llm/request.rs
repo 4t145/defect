@@ -78,7 +78,7 @@ pub enum MessageContent {
         mime: String,
         data: ImageData,
     },
-    /// provider-hosted 能力产生的活动（hosted search / hosted code execution
+    /// provider-hosted 能力产生的活动（hosted web_search / hosted code execution
     /// 等）。agent 不解释 `payload`：在重发同 provider 时透传，切 provider
     /// 时由 codec 决定如何降级。
     ///

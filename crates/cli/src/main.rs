@@ -41,7 +41,7 @@ use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 use defect_llm::provider::openai::{OpenAiConfig, OpenAiProvider};
 use defect_mcp::McpToolFactory;
 use defect_storage::StorageObserver;
-use defect_tools::{BashTool, EditFileTool, FetchTool, ReadFileTool, WriteFileTool};
+use defect_tools::{BashTool, EditFileTool, FetchTool, ReadFileTool, SearchTool, WriteFileTool};
 use tracing_subscriber::EnvFilter;
 
 mod hooks;
@@ -284,6 +284,13 @@ fn build_process_tools(config: &LoadedConfig) -> Arc<dyn ToolRegistry> {
     if config.effective.tools.fetch.enabled {
         builder = builder.insert(Arc::new(FetchTool::from_config(
             &config.effective.tools.fetch,
+        )));
+    }
+    // 本地 `search` 工具（grep/glob）：仅看 `[tools.search].enabled`。与
+    // hosted `web_search` capability 完全独立——两者可同时启用。
+    if config.effective.tools.search.enabled {
+        builder = builder.insert(Arc::new(SearchTool::from_config(
+            &config.effective.tools.search,
         )));
     }
     Arc::new(builder.build())

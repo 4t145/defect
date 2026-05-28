@@ -36,8 +36,8 @@ mod tool_registry;
 mod turn;
 
 pub use capabilities::{
-    ResolvedSessionCapabilities, SearchCapabilityConfig, SearchCapabilityMode,
-    SessionCapabilitiesConfig,
+    ResolvedSessionCapabilities, SessionCapabilitiesConfig, WebSearchCapabilityConfig,
+    WebSearchCapabilityMode,
 };
 pub use default::{DefaultAgentCore, DefaultAgentCoreBuilder, DefaultSession, uuid_like};
 pub use events::EventEmitter;
@@ -305,7 +305,7 @@ pub enum AgentError {
 pub enum SessionInitError {
     /// 用户显式选择 `Delegate`，但 provider 不支持对应 hosted capability。
     CapabilityUnsatisfied {
-        /// 出问题的 capability 名（例如 `"search"`）。
+        /// 出问题的 capability 名（例如 `"web_search"`）。
         capability: &'static str,
         /// 当前 session 绑定的 provider 名。
         provider: String,
@@ -325,15 +325,15 @@ impl std::fmt::Display for SessionInitError {
                 )?;
                 writeln!(f)?;
                 writeln!(f, "To fix this, choose one of:")?;
-                writeln!(f, "  1. Override per-provider in your config:")?;
+                writeln!(f, "  1. Disable hosted {capability} for this provider:")?;
                 writeln!(f, "       [providers.{provider}.capabilities.{capability}]")?;
-                writeln!(f, "       mode = \"local\"")?;
+                writeln!(f, "       mode = \"disabled\"")?;
                 writeln!(
                     f,
-                    "  2. Change global default to `local` and keep hosted only for providers that support it:"
+                    "  2. Change global default to `disabled` and only delegate where supported:"
                 )?;
                 writeln!(f, "       [capabilities.{capability}]")?;
-                writeln!(f, "       mode = \"local\"")?;
+                writeln!(f, "       mode = \"disabled\"")?;
                 writeln!(
                     f,
                     "       [providers.<hosted-supported>.capabilities.{capability}]"

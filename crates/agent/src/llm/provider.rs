@@ -32,9 +32,9 @@ pub trait LlmProvider: Send + Sync {
     /// provider adapter 自报家门的 hosted capability 集合。
     ///
     /// 与 [`Self::capabilities`] 不同——前者是模型属性，这里是当前
-    /// adapter 实现状态：能否把 hosted search / fetch 等通过 wire 暴露
+    /// adapter 实现状态：能否把 hosted web_search / fetch 等通过 wire 暴露
     /// 给模型。session 启动期会读这个值与
-    /// `capabilities.search.mode` 一起做能力来源裁决。
+    /// `capabilities.web_search.mode` 一起做 hosted web search 的能力来源裁决。
     ///
     /// 默认实现返回全 `false`，新 provider 不需要主动覆盖。
     /// 真支持 hosted 的 adapter（Anthropic / OpenAI Responses）应
