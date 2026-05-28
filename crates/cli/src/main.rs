@@ -23,6 +23,7 @@ use agent_client_protocol::schema::{
 };
 use clap::{Parser, ValueEnum};
 use defect_acp::EchoProvider;
+use defect_agent::hooks::builtin::BuiltinRegistry;
 use defect_agent::llm::LlmProvider;
 use defect_agent::policy::{
     AskWritesPolicy, DenyAllPolicy, OpenPolicy, ReadOnlyPolicy, SandboxPolicy,
@@ -42,6 +43,8 @@ use defect_mcp::McpToolFactory;
 use defect_storage::StorageObserver;
 use defect_tools::{BashTool, EditFileTool, FetchTool, ReadFileTool, WriteFileTool};
 use tracing_subscriber::EnvFilter;
+
+mod hooks;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -101,6 +104,11 @@ async fn main() -> anyhow::Result<()> {
 
     let tools = build_process_tools(&config);
     let storage = Arc::new(StorageObserver::new(default_sessions_root()?));
+
+    let builtin_registry = BuiltinRegistry::defaults();
+    let hook_engine = hooks::build_engine_arc(&config.effective.hooks, &builtin_registry)
+        .map_err(|e| anyhow::anyhow!("hook engine build failed: {e}"))?;
+
     let agent = DefaultAgentCore::builder()
         .provider(provider)
         .process_tools(tools)
@@ -113,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
         .config(turn_config)
         .capabilities(session_capabilities)
         .http(http_client)
+        .hook_engine(hook_engine)
         .build();
     let agent: Arc<dyn AgentCore> = Arc::new(agent);
 

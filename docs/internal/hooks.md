@@ -746,16 +746,22 @@ impl HookHandler for SkillRouterHook {
 
 ## 10. 落地节奏
 
-按下列顺序，不另开 ticket：
+按下列顺序，不另开 ticket。✓ 表示当前 main 分支已落地。
 
-1. 新建 `crates/agent/src/hooks.rs`（trait + enum + DefaultHookEngine 骨架）
-2. `defect-config` 新增 `[hooks]` section 的解析（§5）
-3. `DefaultSession::create_session` 接入 SessionStart（§7.1）
-4. `TurnRunner` 接入 UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure 四个 await 点
-5. Builtin handler：`tracing-audit`、`redact-secrets` 各一个
-6. Command handler：`Argv` 形态先；`Shell` 形态做 `ShellKind::Sh`
-7. Prompt handler：依赖 `LlmProvider`，落地放最后
-8. CLI：`defect hooks list / trust / revoke`
-9. e2e：mock provider + scripted hook 配置走 5 件套各一遍
+1. ✓ 新建 `crates/agent/src/hooks.rs`（trait + enum + DefaultHookEngine 骨架）
+2. ✓ `defect-config` 新增 `[hooks]` section 的解析（§5）
+3. ✓ `DefaultSession::create_session` 接入 SessionStart（§7.1）
+4. ✓ `TurnRunner` 接入 UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure 四个 await 点
+5. ✓ Builtin handler：`tracing-audit`、`redact-secrets` 各一个（`crates/agent/src/hooks/builtin.rs`）
+6. ✓ CLI 装配：`crates/cli/src/hooks.rs` 把 `HooksConfig` 翻成 `DefaultHookEngine`，未知 builtin 名 fail-fast；空配置走 `NoopHookEngine`
+7. Command handler：`Argv` 形态先；`Shell` 形态做 `ShellKind::Sh`（v0 占位 `Configuration` 错误，待 Phase E）
+8. Prompt handler：依赖 `LlmProvider`，落地放最后（v0 占位 `Configuration` 错误，待 Phase F）
+9. CLI：`defect hooks list / trust / revoke`（依赖 §6 trust 注册表落地）
+10. e2e：mock provider + scripted hook 配置走 5 件套各一遍
 
 测试策略：复用 [`docs/testing/e2e.md`](../testing/e2e.md) 的 mock 框架；hook engine 单测用 mock handler 验合并规则与 pipeline 顺序。
+
+当前 unit 覆盖：
+- `crates/agent/src/hooks.rs` — pipeline / matcher / glob / 超时 / panic 降级（16 测）
+- `crates/agent/src/hooks/builtin.rs` — registry + 两个 builtin（7 测）
+- `crates/cli/src/hooks.rs` — config → engine 翻译 + fail-fast（5 测）

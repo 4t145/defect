@@ -391,6 +391,110 @@ fn encode_request_splits_tool_use_and_tool_result_into_separate_messages() {
 }
 
 #[test]
+fn encode_request_keeps_prompt_cache_key_stable_across_tool_result_followups() {
+    let req = CompletionRequest {
+        model: "gpt-4o-mini".into(),
+        system: Some("you are helpful".into()),
+        messages: vec![
+            Message {
+                role: Role::Assistant,
+                content: vec![
+                    MessageContent::Text {
+                        text: "calling".into(),
+                    },
+                    MessageContent::ToolUse {
+                        id: "call_1".into(),
+                        name: "fs_read".into(),
+                        args: json!({"path": "/tmp/a"}),
+                    },
+                ],
+            },
+            Message {
+                role: Role::User,
+                content: vec![
+                    MessageContent::Text {
+                        text: "see results below".into(),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "call_1".into(),
+                        output: ToolResultBody::Text {
+                            text: "hello".into(),
+                        },
+                        is_error: false,
+                    },
+                ],
+            },
+        ],
+        tools: vec![ToolSchema {
+            name: "fs_read".into(),
+            description: "Read a file".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            }),
+        }],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+
+    let first = encode_request(&req);
+
+    let mut changed = req.clone();
+    changed.messages[1] = Message {
+        role: Role::User,
+        content: vec![
+            MessageContent::Text {
+                text: "different follow-up text".into(),
+            },
+            MessageContent::ToolResult {
+                tool_use_id: "call_1".into(),
+                output: ToolResultBody::Text {
+                    text: "different tool output".into(),
+                },
+                is_error: true,
+            },
+        ],
+    };
+
+    let second = encode_request(&changed);
+
+    assert_eq!(
+        first.prompt_cache_key, second.prompt_cache_key,
+        "turn-local tool results and follow-up user text should not perturb cache key"
+    );
+
+    let wire::ChatCompletionRequestMessage::ChatCompletionRequestSystemMessage(_) =
+        &first.messages[0]
+    else {
+        panic!("expected system");
+    };
+    let wire::ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(_) =
+        &first.messages[1]
+    else {
+        panic!("expected assistant");
+    };
+    let wire::ChatCompletionRequestMessage::ChatCompletionRequestToolMessage(tool_msg) =
+        &first.messages[2]
+    else {
+        panic!("expected tool");
+    };
+    assert_eq!(tool_msg.tool_call_id, "call_1");
+    let wire::ChatCompletionRequestMessage::ChatCompletionRequestUserMessage(user_msg) =
+        &first.messages[3]
+    else {
+        panic!("expected user");
+    };
+    let wire::ChatCompletionRequestUserMessageContent::ChatCompletionRequestUserMessageContentVariant1(parts) =
+        &user_msg.content
+    else {
+        panic!("expected list user content");
+    };
+    assert_eq!(parts.len(), 1);
+}
+
+#[test]
 fn encode_request_image_base64_and_url() {
     let req = CompletionRequest {
         model: "gpt-4o".into(),
