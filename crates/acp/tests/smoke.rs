@@ -348,10 +348,22 @@ async fn load_session_round_trip() {
 
     let cwd = std::env::current_dir().expect("cwd available");
     let prompt_text = "resume me";
+    let updates: Arc<Mutex<Vec<SessionUpdate>>> = Arc::new(Mutex::new(Vec::new()));
+    let updates_for_handler = updates.clone();
 
     let client_result = Client
         .builder()
         .name("load-session-client")
+        .on_receive_notification(
+            async move |notif: SessionNotification, _cx| {
+                updates_for_handler
+                    .lock()
+                    .expect("updates mutex")
+                    .push(notif.update);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
         .connect_with(
             ChannelTransport::<Client>::new(channel_a),
             async move |cx| {
@@ -392,6 +404,24 @@ async fn load_session_round_trip() {
                 .await?
                 .models
                 .expect("loaded session should include model candidates");
+
+                let replayed_user_text = updates
+                    .lock()
+                    .expect("updates mutex")
+                    .iter()
+                    .filter_map(|update| match update {
+                        SessionUpdate::UserMessageChunk(chunk) => Some(&chunk.content),
+                        _ => None,
+                    })
+                    .filter_map(|content| match content {
+                        ContentBlock::Text(text) => Some(text.text.as_str()),
+                        _ => None,
+                    })
+                    .any(|text| text == prompt_text);
+                assert!(
+                    replayed_user_text,
+                    "session/load should replay previous user transcript"
+                );
 
                 let second = cx
                     .send_request(PromptRequest::new(

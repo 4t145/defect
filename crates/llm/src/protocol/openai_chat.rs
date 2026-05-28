@@ -56,9 +56,10 @@ type UsageParser = fn(Option<&serde_json::Value>, &wire::CompletionUsage) -> Usa
 ///   （OpenAI 协议规定 `function.arguments` 为 stringified JSON）。
 /// - `top_k` 在 OpenAI 协议里不存在；这里直接丢弃，由 provider 层负责
 ///   warn（`docs/internal/llm-trait.md` §6 能力矩阵）。
-/// - `max_tokens`：OpenAI 把 `max_tokens` 标 deprecated，新字段是
-///   `max_completion_tokens`。一律走新字段，且**不**像 Anthropic 那样
-///   兜底默认值 —— OpenAI 不强制（不传时由模型决定）。
+/// - `max_tokens`：OpenAI 官方方言把 `max_tokens` 标 deprecated，新字段是
+///   `max_completion_tokens`。DeepSeek 兼容方言仍使用 `max_tokens`，以贴近
+///   其 OpenAI-compatible 端点与 opencode 的请求形态。两者都**不**像
+///   Anthropic 那样兜底默认值 —— 不传时由模型决定。
 pub fn encode_request(req: &CompletionRequest) -> wire::CreateChatCompletionRequest {
     encode_request_with_echo(req, ThinkingEcho::Forbidden)
 }
@@ -74,14 +75,47 @@ pub fn encode_request_with_echo(
     req: &CompletionRequest,
     echo_mode: ThinkingEcho,
 ) -> wire::CreateChatCompletionRequest {
+    encode_request_full(req, echo_mode, None)
+}
+
+/// 与 [`encode_request_with_echo`] 同形态，但允许 provider 层强制覆盖
+/// `reasoning_effort` 字段。`effort_override` = `Some(_)` 时无视
+/// [`SamplingParams::thinking`] 的取值，直接落到 wire；`None` 时维持
+/// 旧行为（thinking enabled → medium）。
+pub fn encode_request_full(
+    req: &CompletionRequest,
+    echo_mode: ThinkingEcho,
+    effort_override: Option<ReasoningEffort>,
+) -> wire::CreateChatCompletionRequest {
+    encode_request_with_dialect(req, echo_mode, effort_override, ChatDialect::OpenAi)
+}
+
+/// OpenAI Chat-compatible request dialect.
+///
+/// OpenAI 官方与兼容厂商在同一个 JSON schema 下仍有少量字段语义差异。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ChatDialect {
+    #[default]
+    OpenAi,
+    DeepSeek,
+}
+
+/// 与 [`encode_request_full`] 同形态，但允许 provider 指定兼容厂商方言。
+pub fn encode_request_with_dialect(
+    req: &CompletionRequest,
+    echo_mode: ThinkingEcho,
+    effort_override: Option<ReasoningEffort>,
+    dialect: ChatDialect,
+) -> wire::CreateChatCompletionRequest {
     let mut messages = Vec::with_capacity(req.messages.len() + 1);
     if let Some(sys) = req.system.as_ref() {
         messages.push(encode_system_message(sys));
     }
     for m in &req.messages {
-        encode_message_into(m, echo_mode, &mut messages);
+        encode_message_into(m, echo_mode, dialect, &mut messages);
     }
 
+    let max_tokens = req.sampling.max_tokens.map(i64::from);
     #[allow(deprecated)]
     wire::CreateChatCompletionRequest {
         // ---- 我们使用的字段 ----
@@ -94,7 +128,10 @@ pub fn encode_request_with_echo(
                 include_obfuscation: None,
             },
         )),
-        max_completion_tokens: req.sampling.max_tokens.map(i64::from),
+        max_completion_tokens: match dialect {
+            ChatDialect::OpenAi => max_tokens,
+            ChatDialect::DeepSeek => None,
+        },
         temperature: req.sampling.temperature.map(|t| {
             wire::CreateChatCompletionRequestTemperature::CreateChatCompletionRequestTemperatureVariant0(
                 f64::from(t),
@@ -112,7 +149,9 @@ pub fn encode_request_with_echo(
                 req.sampling.stop_sequences.clone(),
             ))
         },
-        reasoning_effort: encode_thinking(req.sampling.thinking),
+        reasoning_effort: effort_override
+            .map(encode_reasoning_effort)
+            .or_else(|| encode_thinking(req.sampling.thinking)),
         tools: if req.tools.is_empty() {
             None
         } else {
@@ -124,7 +163,10 @@ pub fn encode_request_with_echo(
         top_logprobs: None,
         user: None,
         safety_identifier: None,
-        prompt_cache_key: Some(build_prompt_cache_key(req, echo_mode)),
+        prompt_cache_key: match dialect {
+            ChatDialect::OpenAi => Some(build_prompt_cache_key(req, echo_mode)),
+            ChatDialect::DeepSeek => None,
+        },
         service_tier: None,
         prompt_cache_retention: None,
         modalities: None,
@@ -137,7 +179,10 @@ pub fn encode_request_with_echo(
         store: None,
         logit_bias: None,
         logprobs: None,
-        max_tokens: None,
+        max_tokens: match dialect {
+            ChatDialect::OpenAi => None,
+            ChatDialect::DeepSeek => max_tokens,
+        },
         n: None,
         prediction: None,
         seed: None,
@@ -237,11 +282,12 @@ fn encode_system_message(text: &str) -> wire::ChatCompletionRequestMessage {
 fn encode_message_into(
     m: &Message,
     echo_mode: ThinkingEcho,
+    dialect: ChatDialect,
     out: &mut Vec<wire::ChatCompletionRequestMessage>,
 ) {
     match m.role {
         Role::User => encode_user_message_into(m, out),
-        Role::Assistant => encode_assistant_message_into(m, echo_mode, out),
+        Role::Assistant => encode_assistant_message_into(m, echo_mode, dialect, out),
     }
 }
 
@@ -332,6 +378,7 @@ fn encode_user_message_into(m: &Message, out: &mut Vec<wire::ChatCompletionReque
 fn encode_assistant_message_into(
     m: &Message,
     echo_mode: ThinkingEcho,
+    dialect: ChatDialect,
     out: &mut Vec<wire::ChatCompletionRequestMessage>,
 ) {
     const EMPTY_ASSISTANT_CONTENT: &str = "";
@@ -368,13 +415,16 @@ fn encode_assistant_message_into(
         }
     }
 
-    let reasoning_content = match (echo_mode, reasoning_text.is_empty()) {
-        (ThinkingEcho::Required, false) => Some(reasoning_text),
-        // Optional 也按 Required 处理：服务端容忍多发的场景下回放更
-        // 安全（DeepSeek-v4-pro 文档把它列为 must、其它 Optional 厂商
-        // 多发也不报错）。
-        (ThinkingEcho::Optional, false) => Some(reasoning_text),
-        _ => None,
+    let reasoning_content = match dialect {
+        ChatDialect::DeepSeek => Some(reasoning_text),
+        ChatDialect::OpenAi => match (echo_mode, reasoning_text.is_empty()) {
+            (ThinkingEcho::Required, false) => Some(reasoning_text),
+            // Optional 也按 Required 处理：服务端容忍多发的场景下回放更
+            // 安全（DeepSeek-v4-pro 文档把它列为 must、其它 Optional 厂商
+            // 多发也不报错）。
+            (ThinkingEcho::Optional, false) => Some(reasoning_text),
+            _ => None,
+        },
     };
     let content = if text_parts.is_empty() {
         if tool_calls.is_empty() && reasoning_content.is_some() {
@@ -436,6 +486,35 @@ fn encode_thinking(t: ThinkingConfig) -> Option<wire::ReasoningEffort> {
         )),
         _ => None,
     }
+}
+
+/// 公开等级枚举：与 OpenAI wire `reasoning_effort` 一一对应。
+///
+/// `xhigh` 仅 `gpt-5.1-codex-max` 之后支持；`none` 仅 `gpt-5.1` 之后支持。
+/// 协议层不区分模型，原样发送，由上游做模型校验。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+fn encode_reasoning_effort(effort: ReasoningEffort) -> wire::ReasoningEffort {
+    use ReasoningEffort as E;
+    use wire::ReasoningEffortVariant0 as V;
+    let v = match effort {
+        E::None => V::None,
+        E::Minimal => V::Minimal,
+        E::Low => V::Low,
+        E::Medium => V::Medium,
+        E::High => V::High,
+        E::Xhigh => V::Xhigh,
+    };
+    wire::ReasoningEffort::ReasoningEffortVariant0(v)
 }
 
 fn encode_tool_choice(c: &ToolChoice) -> Option<wire::ChatCompletionToolChoiceOption> {

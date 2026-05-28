@@ -2,6 +2,8 @@
 
 `defect-llm` crate 负责把"消息 + 工具 + 采样参数 → 流式增量结果"这一过程，从两家不同 wire format（Anthropic Messages / OpenAI Chat Completions）以及多家厂商的传输/鉴权差异背后隐藏起来。
 
+这里的 `provider` 是运行时适配器，不是一个单独的 `instance` 领域概念。`protocol` 只负责 wire 编解码，`provider` 负责把 `protocol` 接到具体的 base_url、鉴权、header、模型表和 vendor-specific 行为上。
+
 ## 1. 两层架构
 
 模块切分为**协议层**与**厂商层**两层，各管各的事：

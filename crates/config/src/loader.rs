@@ -14,15 +14,15 @@ use crate::overrides::{
     build_cli_layer, merge_toml_values, remove_toml_path, remove_toml_table_key,
 };
 use crate::types::{
-    AnthropicConfigFile, BasePromptConfigFile, BashToolConfig, CapabilitiesConfig, CliConfig,
-    ConfigError, ConfigLayerEntry, ConfigLayerStack, ConfigSource, ConfigToml, ConfigWarning,
+    BasePromptConfigFile, BashToolConfig, CapabilitiesConfig, CliConfig, ConfigError,
+    ConfigLayerEntry, ConfigLayerStack, ConfigSource, ConfigToml, ConfigWarning,
     DEFAULT_ANTHROPIC_MODEL, DEFAULT_BASH_MAX_TIMEOUT_MS, DEFAULT_BASH_TIMEOUT_MS,
     DEFAULT_DEEPSEEK_MODEL, DEFAULT_ECHO_MODEL, DEFAULT_FS_READ_LIMIT, DEFAULT_FS_READ_MAX_LIMIT,
-    DEFAULT_OPENAI_MODEL, DeepSeekConfigFile, EffectiveConfig, FetchToolConfig, FsToolConfig,
-    HooksConfig, HttpClientConfig, HttpProxyConfig, HttpProxySettings, LoadConfigOptions,
-    LoadedConfig, OpenAiConfigFile, OtlpTracingConfig, PROJECT_CONFIG_RELATIVE,
-    PROJECT_LOCAL_CONFIG_RELATIVE, PromptConfigFile, ProviderCapabilityOverrides, ProviderConfigs,
-    ProviderKind, SandboxConfig, SandboxMode, SearchToolConfig, ToolsConfig, TracingConfig,
+    DEFAULT_OPENAI_MODEL, EffectiveConfig, FetchToolConfig, FsToolConfig, HooksConfig,
+    HttpClientConfig, HttpProxyConfig, HttpProxySettings, LoadConfigOptions, LoadedConfig,
+    OtlpTracingConfig, PROJECT_CONFIG_RELATIVE, PROJECT_LOCAL_CONFIG_RELATIVE, PromptConfigFile,
+    ProviderCapabilityOverrides, ProviderConfigFile, ProviderConfigs, ProviderKind,
+    ProviderSection, SandboxConfig, SandboxMode, SearchToolConfig, ToolsConfig, TracingConfig,
     USER_CONFIG_RELATIVE,
 };
 use defect_agent::session::WebSearchCapabilityConfig;
@@ -195,50 +195,33 @@ fn build_effective_config(
     let _ = config.base_prompt.file.as_deref();
     let _ = config.base_prompt.text.as_deref();
     let provider = config.default.provider.unwrap_or_default();
-    let provider_model = match provider {
-        ProviderKind::Echo => Some(DEFAULT_ECHO_MODEL.to_string()),
-        ProviderKind::Anthropic => config
-            .providers
-            .anthropic
-            .as_ref()
-            .and_then(|cfg| cfg.default_model.clone())
-            .or_else(|| Some(DEFAULT_ANTHROPIC_MODEL.to_string())),
-        ProviderKind::Openai => config
-            .providers
-            .openai
-            .as_ref()
-            .and_then(|cfg| cfg.default_model.clone())
-            .or_else(|| Some(DEFAULT_OPENAI_MODEL.to_string())),
-        ProviderKind::Deepseek => config
-            .providers
-            .deepseek
-            .as_ref()
-            .and_then(|cfg| cfg.default_model.clone())
-            .or_else(|| Some(DEFAULT_DEEPSEEK_MODEL.to_string())),
+    let provider_config = raw_provider_config(&config.providers, &provider);
+    if matches!(provider, ProviderKind::Custom(_)) && provider_config.is_none() {
+        return Err(ConfigError::Invalid {
+            path: path.to_path_buf(),
+            message: format!(
+                "default.provider `{provider}` has no matching [providers.{provider}] section"
+            ),
+        });
+    }
+    let provider_model = provider_default_model(&provider, provider_config);
+    let provider_allowed_models = provider_config.and_then(|cfg| cfg.models.clone());
+    let model = match config.default.model.or(provider_model) {
+        Some(model) => model,
+        None => {
+            return Err(ConfigError::Invalid {
+                path: path.to_path_buf(),
+                message: format!(
+                    "default.model or providers.{provider}.default_model is required for provider `{provider}`"
+                ),
+            });
+        }
     };
-    let allowed_models = match provider {
-        ProviderKind::Echo => None,
-        ProviderKind::Anthropic => config
-            .providers
-            .anthropic
-            .as_ref()
-            .and_then(|cfg| cfg.models.clone()),
-        ProviderKind::Openai => config
-            .providers
-            .openai
-            .as_ref()
-            .and_then(|cfg| cfg.models.clone()),
-        ProviderKind::Deepseek => config
-            .providers
-            .deepseek
-            .as_ref()
-            .and_then(|cfg| cfg.models.clone()),
-    };
-    let model = config
-        .default
-        .model
-        .or(provider_model)
-        .unwrap_or_else(|| DEFAULT_ECHO_MODEL.to_string());
+    let allowed_models = merged_allowed_models(
+        provider_allowed_models,
+        configured_provider_models(&config.providers),
+        &model,
+    );
 
     let prompt = PromptConfigFile {
         file: config.prompt.file.unwrap_or_else(|| "AGENTS.md".to_owned()),
@@ -354,35 +337,29 @@ fn build_effective_config(
             anthropic: config
                 .providers
                 .anthropic
-                .map(|cfg| AnthropicConfigFile {
-                    base_url: cfg.base_url,
-                    default_model: cfg.default_model,
-                    models: cfg.models,
-                    capabilities: provider_capability_overrides(cfg.capabilities.as_ref()),
-                })
+                .map(provider_config_file)
                 .unwrap_or_default(),
             openai: config
                 .providers
                 .openai
-                .map(|cfg| OpenAiConfigFile {
-                    base_url: cfg.base_url,
-                    default_model: cfg.default_model,
-                    models: cfg.models,
-                    organization: cfg.organization,
-                    project: cfg.project,
-                    capabilities: provider_capability_overrides(cfg.capabilities.as_ref()),
-                })
+                .map(provider_config_file)
                 .unwrap_or_default(),
             deepseek: config
                 .providers
                 .deepseek
-                .map(|cfg| DeepSeekConfigFile {
-                    base_url: cfg.base_url,
-                    default_model: cfg.default_model,
-                    models: cfg.models,
-                    capabilities: provider_capability_overrides(cfg.capabilities.as_ref()),
-                })
+                .map(provider_config_file)
                 .unwrap_or_default(),
+            litellm: config
+                .providers
+                .litellm
+                .map(provider_config_file)
+                .unwrap_or_default(),
+            custom: config
+                .providers
+                .custom
+                .into_iter()
+                .map(|(name, cfg)| (name, provider_config_file(cfg)))
+                .collect(),
         },
         tools: ToolsConfig {
             bash: config
@@ -439,6 +416,108 @@ fn build_effective_config(
     })
 }
 
+fn raw_provider_config<'a>(
+    providers: &'a crate::types::ProvidersSection,
+    provider: &ProviderKind,
+) -> Option<&'a ProviderSection> {
+    match provider {
+        ProviderKind::Echo => None,
+        ProviderKind::Anthropic => providers.anthropic.as_ref(),
+        ProviderKind::Openai => providers.openai.as_ref(),
+        ProviderKind::Deepseek => providers.deepseek.as_ref(),
+        ProviderKind::Litellm => providers.litellm.as_ref(),
+        ProviderKind::Custom(name) => providers.custom.get(name),
+    }
+}
+
+fn merged_allowed_models(
+    provider_allowed_models: Option<Vec<String>>,
+    configured_models: Vec<String>,
+    current_model: &str,
+) -> Option<Vec<String>> {
+    let mut models = provider_allowed_models.unwrap_or_default();
+    append_unique_models(&mut models, configured_models);
+    if models.is_empty() {
+        return None;
+    }
+    if !models.iter().any(|model| model == current_model) {
+        models.insert(0, current_model.to_string());
+    }
+    Some(models)
+}
+
+fn configured_provider_models(providers: &crate::types::ProvidersSection) -> Vec<String> {
+    let mut models = Vec::new();
+    for section in [
+        providers.anthropic.as_ref(),
+        providers.openai.as_ref(),
+        providers.deepseek.as_ref(),
+        providers.litellm.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        append_unique_models(&mut models, provider_declared_models(section));
+    }
+    for section in providers.custom.values() {
+        append_unique_models(&mut models, provider_declared_models(section));
+    }
+    models
+}
+
+fn provider_declared_models(section: &ProviderSection) -> Vec<String> {
+    let mut models = Vec::new();
+    if let Some(default_model) = &section.default_model {
+        models.push(default_model.clone());
+    }
+    if let Some(section_models) = &section.models {
+        append_unique_models(&mut models, section_models.clone());
+    }
+    models
+}
+
+fn append_unique_models(target: &mut Vec<String>, source: Vec<String>) {
+    for model in source {
+        if !target.iter().any(|existing| existing == &model) {
+            target.push(model);
+        }
+    }
+}
+
+fn provider_default_model(
+    provider: &ProviderKind,
+    config: Option<&ProviderSection>,
+) -> Option<String> {
+    if let Some(default_model) = config.and_then(|cfg| cfg.default_model.clone()) {
+        return Some(default_model);
+    }
+    match provider {
+        ProviderKind::Echo => Some(DEFAULT_ECHO_MODEL.to_string()),
+        ProviderKind::Anthropic => Some(DEFAULT_ANTHROPIC_MODEL.to_string()),
+        ProviderKind::Openai => Some(DEFAULT_OPENAI_MODEL.to_string()),
+        ProviderKind::Deepseek => Some(DEFAULT_DEEPSEEK_MODEL.to_string()),
+        ProviderKind::Litellm => None,
+        ProviderKind::Custom(_) => None,
+    }
+}
+
+fn provider_config_file(cfg: ProviderSection) -> ProviderConfigFile {
+    ProviderConfigFile {
+        protocol: cfg.protocol,
+        base_url: cfg.base_url,
+        default_model: cfg.default_model,
+        models: cfg.models,
+        display_name: cfg.display_name,
+        api_key_env: cfg.api_key_env,
+        organization: cfg.organization,
+        project: cfg.project,
+        aws: cfg.aws,
+        headers: cfg.headers.unwrap_or_default(),
+        capabilities: provider_capability_overrides(cfg.capabilities.as_ref()),
+        reasoning_effort: cfg.reasoning_effort,
+    }
+}
+
 fn provider_capability_overrides(
     section: Option<&crate::types::ProviderCapabilitiesSection>,
 ) -> ProviderCapabilityOverrides {
@@ -477,7 +556,17 @@ fn sanitize_shared_project_layer(
         .and_then(TomlValue::as_table_mut)
     {
         for (provider_name, provider_value) in providers.iter_mut() {
-            for key in ["base_url", "organization", "project", "api_key", "token"] {
+            for key in [
+                "protocol",
+                "base_url",
+                "organization",
+                "project",
+                "api_key",
+                "api_key_env",
+                "token",
+                "headers",
+                "aws",
+            ] {
                 if remove_toml_table_key(provider_value, key) {
                     warnings.push(ConfigWarning::IgnoredProjectKey {
                         path: path.clone(),
@@ -638,20 +727,58 @@ fn is_known_config_key(key: &str) -> bool {
             | "turn.max_llm_retries"
             | "turn.max_concurrent_tools"
             | "capabilities.web_search.mode"
+            | "providers.anthropic.protocol"
             | "providers.anthropic.base_url"
             | "providers.anthropic.default_model"
             | "providers.anthropic.models"
+            | "providers.anthropic.display_name"
+            | "providers.anthropic.api_key_env"
+            | "providers.anthropic.organization"
+            | "providers.anthropic.project"
+            | "providers.anthropic.aws.profile"
+            | "providers.anthropic.aws.region"
+            | "providers.anthropic.headers"
             | "providers.anthropic.capabilities.web_search.mode"
+            | "providers.anthropic.reasoning_effort"
+            | "providers.openai.protocol"
             | "providers.openai.base_url"
             | "providers.openai.default_model"
             | "providers.openai.models"
+            | "providers.openai.display_name"
+            | "providers.openai.api_key_env"
             | "providers.openai.organization"
             | "providers.openai.project"
+            | "providers.openai.aws.profile"
+            | "providers.openai.aws.region"
+            | "providers.openai.headers"
             | "providers.openai.capabilities.web_search.mode"
+            | "providers.openai.reasoning_effort"
+            | "providers.deepseek.protocol"
             | "providers.deepseek.base_url"
             | "providers.deepseek.default_model"
             | "providers.deepseek.models"
+            | "providers.deepseek.display_name"
+            | "providers.deepseek.api_key_env"
+            | "providers.deepseek.organization"
+            | "providers.deepseek.project"
+            | "providers.deepseek.aws.profile"
+            | "providers.deepseek.aws.region"
+            | "providers.deepseek.headers"
             | "providers.deepseek.capabilities.web_search.mode"
+            | "providers.deepseek.reasoning_effort"
+            | "providers.litellm.protocol"
+            | "providers.litellm.base_url"
+            | "providers.litellm.default_model"
+            | "providers.litellm.models"
+            | "providers.litellm.display_name"
+            | "providers.litellm.api_key_env"
+            | "providers.litellm.organization"
+            | "providers.litellm.project"
+            | "providers.litellm.aws.profile"
+            | "providers.litellm.aws.region"
+            | "providers.litellm.headers"
+            | "providers.litellm.capabilities.web_search.mode"
+            | "providers.litellm.reasoning_effort"
             | "tools.bash.default_timeout_ms"
             | "tools.bash.max_timeout_ms"
             | "tools.fs.read_default_limit"
@@ -682,8 +809,46 @@ fn is_known_config_key(key: &str) -> bool {
             | "http.proxy.http_proxy"
             | "http.proxy.https_proxy"
             | "http.proxy.no_proxy"
-    ) || is_known_mcp_key(key)
+    ) || is_known_provider_dynamic_key(key)
+        || is_known_custom_provider_key(key)
+        || is_known_mcp_key(key)
         || is_known_hooks_key(key)
+}
+
+fn is_known_provider_dynamic_key(key: &str) -> bool {
+    let Some((_provider_name, field)) = split_provider_field(key) else {
+        return false;
+    };
+    field.starts_with("headers.")
+}
+
+fn is_known_custom_provider_key(key: &str) -> bool {
+    let Some((provider_name, field)) = split_provider_field(key) else {
+        return false;
+    };
+    !provider_name.is_empty()
+        && !matches!(provider_name, "anthropic" | "openai" | "deepseek")
+        && provider_name != "litellm"
+        && is_provider_field(field)
+}
+
+fn is_provider_field(field: &str) -> bool {
+    matches!(
+        field,
+        "protocol"
+            | "base_url"
+            | "default_model"
+            | "models"
+            | "display_name"
+            | "api_key_env"
+            | "organization"
+            | "project"
+            | "aws.profile"
+            | "aws.region"
+            | "headers"
+            | "reasoning_effort"
+            | "capabilities.web_search.mode"
+    ) || field.starts_with("headers.")
 }
 
 /// `[hooks]` 段是数组+联合体的混合形态——逐键枚举意义不大，且字段会随
@@ -705,14 +870,21 @@ fn is_known_config_prefix(key: &str) -> bool {
             | "capabilities.web_search"
             | "providers"
             | "providers.anthropic"
+            | "providers.anthropic.aws"
             | "providers.anthropic.capabilities"
             | "providers.anthropic.capabilities.web_search"
             | "providers.openai"
+            | "providers.openai.aws"
             | "providers.openai.capabilities"
             | "providers.openai.capabilities.web_search"
             | "providers.deepseek"
+            | "providers.deepseek.aws"
             | "providers.deepseek.capabilities"
             | "providers.deepseek.capabilities.web_search"
+            | "providers.litellm"
+            | "providers.litellm.aws"
+            | "providers.litellm.capabilities"
+            | "providers.litellm.capabilities.web_search"
             | "tools"
             | "tools.bash"
             | "tools.fs"
@@ -724,8 +896,46 @@ fn is_known_config_prefix(key: &str) -> bool {
             | "mcp"
             | "http"
             | "http.proxy"
-    ) || is_known_mcp_prefix(key)
+    ) || is_known_provider_dynamic_prefix(key)
+        || is_known_custom_provider_prefix(key)
+        || is_known_mcp_prefix(key)
         || is_known_hooks_key(key)
+}
+
+fn is_known_provider_dynamic_prefix(key: &str) -> bool {
+    let Some((_provider_name, field)) = split_provider_field(key) else {
+        return false;
+    };
+    field == "headers"
+}
+
+fn is_known_custom_provider_prefix(key: &str) -> bool {
+    let Some(rest) = key.strip_prefix("providers.") else {
+        return false;
+    };
+    if rest.is_empty() || !rest.contains('.') {
+        return true;
+    }
+    let Some((provider_name, field)) = split_once_dot(rest) else {
+        return false;
+    };
+    !provider_name.is_empty()
+        && !matches!(provider_name, "anthropic" | "openai" | "deepseek")
+        && provider_name != "litellm"
+        && matches!(
+            field,
+            "aws" | "capabilities" | "capabilities.web_search" | "headers"
+        )
+}
+
+fn split_provider_field(key: &str) -> Option<(&str, &str)> {
+    let rest = key.strip_prefix("providers.")?;
+    split_once_dot(rest)
+}
+
+fn split_once_dot(input: &str) -> Option<(&str, &str)> {
+    let (head, tail) = input.split_once('.')?;
+    Some((head, tail))
 }
 
 fn resolve_user_config_path(opts: &LoadConfigOptions) -> Result<PathBuf, ConfigError> {

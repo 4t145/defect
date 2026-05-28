@@ -22,7 +22,7 @@ use futures::future::BoxFuture;
 use crate::error::BoxError;
 use crate::event::{AgentEvent, PermissionResolution};
 use crate::fs::FsBackend;
-use crate::llm::{Message, ModelInfo, ProviderError, ProviderInfo};
+use crate::llm::{Message, ModelCandidate, ModelInfo, ProviderError, ProviderInfo};
 use crate::shell::ShellBackend;
 use crate::tool::{Tool, ToolSchema};
 
@@ -174,6 +174,15 @@ pub trait Session: Send + Sync {
     /// 当 provider 拉取模型列表失败时返回 [`ProviderError`]。
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>>;
 
+    /// 列出 session 可见的 (provider, model) 候选对——多 provider 装配下
+    /// 同一 session 可能跨 provider 切换 model，ACP 渲染时需要在每条候选
+    /// 旁边注明所属 provider。
+    ///
+    /// # Errors
+    ///
+    /// 同 [`Self::list_models`]：provider 列表拉取失败时返回 [`ProviderError`]。
+    fn list_candidates(&self) -> BoxFuture<'_, Result<Vec<ModelCandidate>, ProviderError>>;
+
     /// 切换当前 session 的模型。
     ///
     /// 当前进行中的 turn 保持原模型；后续 turn 使用新模型。
@@ -187,6 +196,9 @@ pub trait Session: Send + Sync {
     /// 互不影响——内部用 mpsc 配 fan-out 保证慢消费者只 backpressure
     /// 自己、不丢事件。具体技术细节见 `docs/internal/session.md` §5。
     fn subscribe(&self) -> EventStream;
+
+    /// 当前历史的只读快照，用于 session/load 后向客户端 replay transcript。
+    fn history_snapshot(&self) -> Vec<Message>;
 
     /// 启动一次 turn。
     ///

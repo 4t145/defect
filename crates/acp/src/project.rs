@@ -7,11 +7,16 @@
 //! - [`Projection::Ignore`]：仅审计，不入 wire
 
 use agent_client_protocol::schema::{
-    ContentChunk, PermissionOption, SessionId, SessionNotification, SessionUpdate, ToolCall,
-    ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
+    Content, ContentChunk, EmbeddedResource, EmbeddedResourceResource, ImageContent,
+    PermissionOption, SessionId, SessionNotification, SessionUpdate, TextContent, ToolCall,
+    ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
 use defect_agent::event::AgentEvent;
+use defect_agent::llm::{ImageData, Message, MessageContent, Role, ToolResultBody};
 use defect_agent::policy::PolicyDecision;
+
+const REPLAY_TOOL_RESULT_TITLE: &str = "Tool result";
+const REPLAY_RESOURCE_URI: &str = "defect://session-replay/text";
 
 /// 一次投影的产物。
 #[allow(clippy::large_enum_variant)]
@@ -88,8 +93,141 @@ pub(crate) fn project(session_id: &SessionId, event: AgentEvent) -> Projection {
     }
 }
 
+/// 将恢复出的 message history 投影成 ACP transcript replay 通知。
+pub(crate) fn replay_notifications(
+    session_id: &SessionId,
+    history: &[Message],
+) -> Vec<SessionNotification> {
+    let mut notifications = Vec::new();
+    for message in history {
+        match message.role {
+            Role::User => replay_user_message(session_id, message, &mut notifications),
+            Role::Assistant => replay_assistant_message(session_id, message, &mut notifications),
+        }
+    }
+    notifications
+}
+
 fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
     SessionNotification::new(session_id.clone(), update)
+}
+
+fn replay_user_message(
+    session_id: &SessionId,
+    message: &Message,
+    notifications: &mut Vec<SessionNotification>,
+) {
+    for content in &message.content {
+        match content {
+            MessageContent::Text { text } => notifications.push(notification(
+                session_id,
+                SessionUpdate::UserMessageChunk(ContentChunk::new(text_block(text.clone()))),
+            )),
+            MessageContent::Image { mime, data } => notifications.push(notification(
+                session_id,
+                SessionUpdate::UserMessageChunk(ContentChunk::new(image_block(mime, data))),
+            )),
+            MessageContent::ToolResult {
+                tool_use_id,
+                output,
+                is_error,
+            } => replay_tool_result(session_id, tool_use_id, output, *is_error, notifications),
+            MessageContent::Thinking { .. }
+            | MessageContent::ToolUse { .. }
+            | MessageContent::ProviderActivity { .. } => {}
+            _ => {}
+        }
+    }
+}
+
+fn replay_assistant_message(
+    session_id: &SessionId,
+    message: &Message,
+    notifications: &mut Vec<SessionNotification>,
+) {
+    for content in &message.content {
+        match content {
+            MessageContent::Thinking { text, .. } => notifications.push(notification(
+                session_id,
+                SessionUpdate::AgentThoughtChunk(ContentChunk::new(text_block(text.clone()))),
+            )),
+            MessageContent::Text { text } => notifications.push(notification(
+                session_id,
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(text_block(text.clone()))),
+            )),
+            MessageContent::ToolUse { id, name, args } => {
+                let fields = ToolCallUpdateFields::new()
+                    .title(name.clone())
+                    .raw_input(args.clone());
+                let tool_call = tool_call_from_fields(ToolCallId::new(id.clone()), fields);
+                notifications.push(notification(session_id, SessionUpdate::ToolCall(tool_call)));
+            }
+            MessageContent::Image { .. }
+            | MessageContent::ToolResult { .. }
+            | MessageContent::ProviderActivity { .. } => {}
+            _ => {}
+        }
+    }
+}
+
+fn replay_tool_result(
+    session_id: &SessionId,
+    tool_use_id: &str,
+    output: &ToolResultBody,
+    is_error: bool,
+    notifications: &mut Vec<SessionNotification>,
+) {
+    let status = if is_error {
+        ToolCallStatus::Failed
+    } else {
+        ToolCallStatus::Completed
+    };
+    let output_text = tool_result_text(output);
+    let fields = ToolCallUpdateFields::new()
+        .title(REPLAY_TOOL_RESULT_TITLE.to_string())
+        .status(status)
+        .content(vec![ToolCallContent::Content(Content::new(text_block(
+            output_text,
+        )))]);
+    notifications.push(notification(
+        session_id,
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            ToolCallId::new(tool_use_id.to_string()),
+            fields,
+        )),
+    ));
+}
+
+fn tool_result_text(output: &ToolResultBody) -> String {
+    match output {
+        ToolResultBody::Text { text } => text.clone(),
+        ToolResultBody::Json { value } => value.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn text_block(text: String) -> agent_client_protocol::schema::ContentBlock {
+    agent_client_protocol::schema::ContentBlock::Text(TextContent::new(text))
+}
+
+fn image_block(mime: &str, data: &ImageData) -> agent_client_protocol::schema::ContentBlock {
+    match data {
+        ImageData::Base64 { encoded } => agent_client_protocol::schema::ContentBlock::Image(
+            ImageContent::new(encoded.clone(), mime.to_string()),
+        ),
+        ImageData::Url { url } => agent_client_protocol::schema::ContentBlock::ResourceLink(
+            agent_client_protocol::schema::ResourceLink::new(url.clone(), url.clone())
+                .mime_type(mime.to_string()),
+        ),
+        _ => agent_client_protocol::schema::ContentBlock::Resource(EmbeddedResource::new(
+            EmbeddedResourceResource::TextResourceContents(
+                agent_client_protocol::schema::TextResourceContents::new(
+                    "unsupported replay image data",
+                    REPLAY_RESOURCE_URI,
+                ),
+            ),
+        )),
+    }
 }
 
 /// 从 [`ToolCallUpdateFields`] 拼出一个完整 [`ToolCall`]。

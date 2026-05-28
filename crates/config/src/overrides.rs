@@ -43,7 +43,7 @@ pub(crate) fn build_cli_layer(cli: &CliOverrides) -> Result<Option<ConfigLayerEn
         apply_toml_override(&mut root, path, value.clone());
         has_values = true;
     }
-    if let Some(provider) = cli.provider {
+    if let Some(provider) = &cli.provider {
         apply_toml_override(
             &mut root,
             "default.provider",

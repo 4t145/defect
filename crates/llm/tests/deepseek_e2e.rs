@@ -21,7 +21,9 @@ const TEST_AUTH_HEADER: &str = "Bearer test-deepseek-key";
 fn provider_for(server_uri: &str) -> Arc<dyn LlmProvider> {
     let cfg = DeepSeekConfig {
         api_key: Some(TEST_API_KEY.to_string()),
+        api_key_env: None,
         base_url: Some(server_uri.to_string()),
+        reasoning_effort: None,
         http: defect_http::HttpStackConfig::default(),
     };
     Arc::new(DeepSeekProvider::new(cfg).expect("provider")) as Arc<dyn LlmProvider>

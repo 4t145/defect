@@ -20,25 +20,73 @@ pub(crate) const USER_CONFIG_RELATIVE: &str = "defect/config.toml";
 pub(crate) const PROJECT_CONFIG_RELATIVE: &str = ".defect/config.toml";
 pub(crate) const PROJECT_LOCAL_CONFIG_RELATIVE: &str = ".defect/config.local.toml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+const PROVIDER_ECHO: &str = "echo";
+const PROVIDER_ANTHROPIC: &str = "anthropic";
+const PROVIDER_OPENAI: &str = "openai";
+const PROVIDER_DEEPSEEK: &str = "deepseek";
+const PROVIDER_LITELLM: &str = "litellm";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum ProviderKind {
     #[default]
     Echo,
     Anthropic,
     Openai,
     Deepseek,
+    Litellm,
+    Custom(String),
+}
+
+impl ProviderKind {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Echo => PROVIDER_ECHO,
+            Self::Anthropic => PROVIDER_ANTHROPIC,
+            Self::Openai => PROVIDER_OPENAI,
+            Self::Deepseek => PROVIDER_DEEPSEEK,
+            Self::Litellm => PROVIDER_LITELLM,
+            Self::Custom(value) => value,
+        }
+    }
 }
 
 impl fmt::Display for ProviderKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = match self {
-            Self::Echo => "echo",
-            Self::Anthropic => "anthropic",
-            Self::Openai => "openai",
-            Self::Deepseek => "deepseek",
-        };
-        f.write_str(value)
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<ProviderKind> for String {
+    fn from(value: ProviderKind) -> Self {
+        value.to_string()
+    }
+}
+
+impl From<String> for ProviderKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            PROVIDER_ECHO => Self::Echo,
+            PROVIDER_ANTHROPIC => Self::Anthropic,
+            PROVIDER_OPENAI => Self::Openai,
+            PROVIDER_DEEPSEEK => Self::Deepseek,
+            PROVIDER_LITELLM => Self::Litellm,
+            _ => Self::Custom(value),
+        }
+    }
+}
+
+impl From<&str> for ProviderKind {
+    fn from(value: &str) -> Self {
+        match value {
+            PROVIDER_ECHO => Self::Echo,
+            PROVIDER_ANTHROPIC => Self::Anthropic,
+            PROVIDER_OPENAI => Self::Openai,
+            PROVIDER_DEEPSEEK => Self::Deepseek,
+            PROVIDER_LITELLM => Self::Litellm,
+            other => Self::Custom(other.to_string()),
+        }
     }
 }
 
@@ -355,9 +403,25 @@ pub struct PromptConfigFile {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ProviderConfigs {
-    pub anthropic: AnthropicConfigFile,
-    pub openai: OpenAiConfigFile,
-    pub deepseek: DeepSeekConfigFile,
+    pub anthropic: ProviderConfigFile,
+    pub openai: ProviderConfigFile,
+    pub deepseek: ProviderConfigFile,
+    pub litellm: ProviderConfigFile,
+    pub custom: BTreeMap<String, ProviderConfigFile>,
+}
+
+impl ProviderConfigs {
+    #[must_use]
+    pub fn get(&self, provider: &ProviderKind) -> Option<&ProviderConfigFile> {
+        match provider {
+            ProviderKind::Echo => None,
+            ProviderKind::Anthropic => Some(&self.anthropic),
+            ProviderKind::Openai => Some(&self.openai),
+            ProviderKind::Deepseek => Some(&self.deepseek),
+            ProviderKind::Litellm => Some(&self.litellm),
+            ProviderKind::Custom(name) => self.custom.get(name),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -499,30 +563,55 @@ impl SandboxMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct AnthropicConfigFile {
-    pub base_url: Option<String>,
-    pub default_model: Option<String>,
-    pub models: Option<Vec<String>>,
-    pub capabilities: ProviderCapabilityOverrides,
+pub type AnthropicConfigFile = ProviderConfigFile;
+pub type OpenAiConfigFile = ProviderConfigFile;
+pub type DeepSeekConfigFile = ProviderConfigFile;
+pub type LiteLlmConfigFile = ProviderConfigFile;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderProtocol {
+    AnthropicMessages,
+    OpenaiChat,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct OpenAiConfigFile {
+pub struct ProviderConfigFile {
+    pub protocol: Option<ProviderProtocol>,
     pub base_url: Option<String>,
     pub default_model: Option<String>,
     pub models: Option<Vec<String>>,
+    pub display_name: Option<String>,
+    pub api_key_env: Option<String>,
     pub organization: Option<String>,
     pub project: Option<String>,
+    pub aws: Option<ProviderAwsConfigFile>,
+    pub headers: BTreeMap<String, String>,
     pub capabilities: ProviderCapabilityOverrides,
+    /// `reasoning_effort` wire 参数。`None` = 不发送，沿用 provider 默认。
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct DeepSeekConfigFile {
-    pub base_url: Option<String>,
-    pub default_model: Option<String>,
-    pub models: Option<Vec<String>>,
-    pub capabilities: ProviderCapabilityOverrides,
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct ProviderAwsConfigFile {
+    pub profile: Option<String>,
+    pub region: Option<String>,
+}
+
+/// OpenAI 兼容协议的 `reasoning_effort` 取值。
+///
+/// 与 OpenAI 官方 wire 枚举 1:1 对齐：`xhigh` 仅 `gpt-5.1-codex-max` 之后
+/// 支持，`none` 仅 `gpt-5.1` 之后支持；配置层不区分模型，原样下发由上游
+/// 校验。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
 }
 
 /// HTTP 客户端栈的 typed 配置。
@@ -715,32 +804,30 @@ pub(crate) struct ProvidersSection {
     pub(crate) anthropic: Option<AnthropicProviderSection>,
     pub(crate) openai: Option<OpenAiProviderSection>,
     pub(crate) deepseek: Option<DeepSeekProviderSection>,
+    pub(crate) litellm: Option<LiteLlmProviderSection>,
+    #[serde(flatten)]
+    pub(crate) custom: BTreeMap<String, ProviderSection>,
 }
 
+pub(crate) type AnthropicProviderSection = ProviderSection;
+pub(crate) type OpenAiProviderSection = ProviderSection;
+pub(crate) type DeepSeekProviderSection = ProviderSection;
+pub(crate) type LiteLlmProviderSection = ProviderSection;
+
 #[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct AnthropicProviderSection {
+pub(crate) struct ProviderSection {
+    pub(crate) protocol: Option<ProviderProtocol>,
     pub(crate) base_url: Option<String>,
     pub(crate) default_model: Option<String>,
     pub(crate) models: Option<Vec<String>>,
-    pub(crate) capabilities: Option<ProviderCapabilitiesSection>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct OpenAiProviderSection {
-    pub(crate) base_url: Option<String>,
-    pub(crate) default_model: Option<String>,
-    pub(crate) models: Option<Vec<String>>,
+    pub(crate) display_name: Option<String>,
+    pub(crate) api_key_env: Option<String>,
     pub(crate) organization: Option<String>,
     pub(crate) project: Option<String>,
+    pub(crate) aws: Option<ProviderAwsConfigFile>,
+    pub(crate) headers: Option<BTreeMap<String, String>>,
     pub(crate) capabilities: Option<ProviderCapabilitiesSection>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct DeepSeekProviderSection {
-    pub(crate) base_url: Option<String>,
-    pub(crate) default_model: Option<String>,
-    pub(crate) models: Option<Vec<String>>,
-    pub(crate) capabilities: Option<ProviderCapabilitiesSection>,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

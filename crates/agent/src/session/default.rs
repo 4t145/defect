@@ -41,7 +41,8 @@ use crate::fs::FsBackend;
 use crate::hooks::{HookCtx, HookEngine, HookEvent, NoopHookEngine, SessionSource};
 use crate::http::{HttpClient, NoopHttpClient};
 use crate::llm::{
-    HostedCapabilities, LlmProvider, ModelInfo, ProviderError, ProviderErrorKind, ProviderInfo,
+    HostedCapabilities, LlmProvider, Message, ModelCandidate, ModelInfo, ProviderError,
+    ProviderErrorKind, ProviderInfo, ProviderRegistry,
 };
 use crate::policy::{AskWritesPolicy, SandboxPolicy};
 use crate::session::capabilities::{ResolvedSessionCapabilities, SessionCapabilitiesConfig};
@@ -58,11 +59,14 @@ use crate::shell::ShellBackend;
 
 /// 默认 [`AgentCore`]。
 pub struct DefaultAgentCore {
-    provider: Arc<dyn LlmProvider>,
+    /// 装配期落地的 provider 目录。session 持有同一份 `Arc`，按当前选中
+    /// 的 model id 解析对应的真实 [`LlmProvider`]——本类不再"持有单一
+    /// provider"。详见 `docs/internal/llm-trait.md` §2 与
+    /// `docs/internal/session.md`。
+    registry: Arc<ProviderRegistry>,
     process_tools: Arc<dyn ToolRegistry>,
     policy: Arc<dyn SandboxPolicy>,
     config: RwLock<TurnConfig>,
-    capabilities: SessionCapabilitiesConfig,
     loader: Option<Arc<dyn SessionLoader>>,
     session_tools: Option<Arc<dyn SessionToolFactory>>,
     observers: Vec<Arc<dyn SessionObserver>>,
@@ -88,7 +92,14 @@ impl DefaultAgentCore {
 
 #[derive(Default)]
 pub struct DefaultAgentCoreBuilder {
-    provider: Option<Arc<dyn LlmProvider>>,
+    registry: Option<Arc<ProviderRegistry>>,
+    /// 单 provider 便捷入口：[`Self::provider`] 写到这里，`build()` 时
+    /// 与 `config.model` 一起合成一份单 entry 的 [`ProviderRegistry`]。
+    /// `registry` 已显式注入时此字段被忽略。
+    single_provider: Option<Arc<dyn LlmProvider>>,
+    /// 单 provider 入口下的 session capabilities。`registry` 显式注入时
+    /// 由 entry 自带，本字段被忽略。
+    single_capabilities: SessionCapabilitiesConfig,
     process_tools: Option<Arc<dyn ToolRegistry>>,
     policy: Option<Arc<dyn SandboxPolicy>>,
     loader: Option<Arc<dyn SessionLoader>>,
@@ -97,12 +108,29 @@ pub struct DefaultAgentCoreBuilder {
     http: Option<Arc<dyn HttpClient>>,
     hook_engine: Option<Arc<dyn HookEngine>>,
     config: TurnConfig,
-    capabilities: SessionCapabilitiesConfig,
 }
 
 impl DefaultAgentCoreBuilder {
+    /// 装配期注入 provider 目录。CLI / 真实启动路径走这条；测试与单
+    /// provider 场景用 [`Self::provider`] 简便。
+    pub fn registry(mut self, registry: Arc<ProviderRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// 单 provider 便捷入口。`build()` 时把它包成单 entry 的
+    /// [`ProviderRegistry`]，default model = [`TurnConfig::model`]。
+    /// 与 [`Self::registry`] 互斥；同时设置时以 `registry` 为准。
     pub fn provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
-        self.provider = Some(provider);
+        self.single_provider = Some(provider);
+        self
+    }
+
+    /// 单 provider 便捷入口下的 session capabilities 配置——会被合到
+    /// `build()` 自动构造的单 entry registry 上。多 provider 路径下应直接
+    /// 把 capabilities 写到 [`ProviderEntry`] 里，本字段会被忽略。
+    pub fn capabilities(mut self, capabilities: SessionCapabilitiesConfig) -> Self {
+        self.single_capabilities = capabilities;
         self
     }
 
@@ -136,11 +164,6 @@ impl DefaultAgentCoreBuilder {
         self
     }
 
-    pub fn capabilities(mut self, capabilities: SessionCapabilitiesConfig) -> Self {
-        self.capabilities = capabilities;
-        self
-    }
-
     /// 设置进程级 HTTP fetch 后端。未设置时退化为 [`NoopHttpClient`]——
     /// 任何 `fetch` 调用都会以 [`crate::http::HttpClientError::Transport`]
     /// 失败，便于不需要网络的测试 / `echo` 装配跳过真实 HTTP 栈构造。
@@ -157,10 +180,69 @@ impl DefaultAgentCoreBuilder {
     }
 
     /// # Panics
-    /// 如果 `provider` 没有设置。
+    /// `registry` 与 `provider` 都未设置；或单 provider 路径下 `config.model`
+    /// 是空字符串（registry 至少要有一个 default model）。
     pub fn build(self) -> DefaultAgentCore {
+        let registry = self.registry.unwrap_or_else(|| {
+            let provider = self
+                .single_provider
+                .expect("DefaultAgentCore requires a provider or a registry");
+            let model_id = self.config.model.clone();
+            assert!(
+                !model_id.is_empty(),
+                "DefaultAgentCoreBuilder::provider() requires TurnConfig::model to be set; \
+                 use registry() for multi-provider setups"
+            );
+            // 单 provider 路径下，把 `TurnConfig::allowed_models` 当作模型
+            // 候选清单——这与 CLI 的多 provider 装配保持对称：用户用
+            // `[providers.<p>.models]` 声明候选，agent 不向 adapter 发
+            // `list_models` 网络请求。`allowed_models` 缺省时退回到只暴露
+            // 默认模型。
+            let model_ids = match self.config.allowed_models.as_ref() {
+                Some(ids) if !ids.is_empty() => ids.clone(),
+                _ => vec![model_id.clone()],
+            };
+            let mut model_infos: Vec<ModelInfo> = model_ids
+                .into_iter()
+                .map(|id| {
+                    provider.model_info(&id).unwrap_or(ModelInfo {
+                        id,
+                        display_name: None,
+                        context_window: None,
+                        max_output_tokens: None,
+                        deprecated: false,
+                        capabilities_overrides: Default::default(),
+                    })
+                })
+                .collect();
+            if !model_infos.iter().any(|m| m.id == model_id) {
+                model_infos.insert(
+                    0,
+                    ModelInfo {
+                        id: model_id.clone(),
+                        display_name: None,
+                        context_window: None,
+                        max_output_tokens: None,
+                        deprecated: false,
+                        capabilities_overrides: Default::default(),
+                    },
+                );
+            }
+            Arc::new(
+                crate::llm::ProviderRegistry::new(
+                    vec![crate::llm::ProviderEntry::new(
+                        provider,
+                        model_infos,
+                        self.single_capabilities,
+                    )],
+                    &model_id,
+                )
+                .expect("single-entry registry must satisfy invariants"),
+            )
+        });
+
         DefaultAgentCore {
-            provider: self.provider.expect("DefaultAgentCore requires a provider"),
+            registry,
             process_tools: self
                 .process_tools
                 .unwrap_or_else(|| Arc::new(StaticToolRegistry::empty()) as Arc<dyn ToolRegistry>),
@@ -177,7 +259,6 @@ impl DefaultAgentCoreBuilder {
                 .hook_engine
                 .unwrap_or_else(|| Arc::new(NoopHookEngine) as Arc<dyn HookEngine>),
             config: RwLock::new(self.config),
-            capabilities: self.capabilities,
             sessions: DashMap::new(),
         }
     }
@@ -201,11 +282,7 @@ impl AgentCore for DefaultAgentCore {
                 return Err(AgentError::DuplicateSessionId(id));
             }
 
-            let resolved = ResolvedSessionCapabilities::resolve(
-                self.capabilities,
-                self.provider.hosted_capabilities(),
-                &self.provider.info().vendor,
-            )?;
+            let initial = self.resolve_initial_provider()?;
 
             let session_tools = match &self.session_tools {
                 Some(factory) => factory
@@ -240,7 +317,8 @@ impl AgentCore for DefaultAgentCore {
                 cwd,
                 history: Box::new(VecHistory::new()) as Box<dyn History>,
                 tools: composite,
-                provider: self.provider.clone(),
+                registry: self.registry.clone(),
+                provider_state: RwLock::new(initial),
                 policy: self.policy.clone(),
                 events: Arc::new(EventEmitter::new()),
                 permissions: Arc::new(PermissionGate::new()),
@@ -251,7 +329,6 @@ impl AgentCore for DefaultAgentCore {
                         .expect("DefaultAgentCore config rwlock poisoned")
                         .clone(),
                 ),
-                hosted_capabilities: resolved.hosted,
                 fs,
                 shell,
                 http: self.http.clone(),
@@ -295,11 +372,7 @@ impl AgentCore for DefaultAgentCore {
                 .load_session(id.clone())
                 .await
                 .map_err(AgentError::Restore)?;
-            let resolved = ResolvedSessionCapabilities::resolve(
-                self.capabilities,
-                self.provider.hosted_capabilities(),
-                &self.provider.info().vendor,
-            )?;
+            let initial = self.resolve_initial_provider()?;
             let session_tools = match &self.session_tools {
                 Some(factory) => factory
                     .build_registry(loaded.info.cwd.clone(), loaded.info.mcp_servers.clone())
@@ -331,7 +404,8 @@ impl AgentCore for DefaultAgentCore {
                     session_tools,
                     self.process_tools.clone(),
                 )),
-                provider: self.provider.clone(),
+                registry: self.registry.clone(),
+                provider_state: RwLock::new(initial),
                 policy: self.policy.clone(),
                 events: Arc::new(EventEmitter::new()),
                 permissions: Arc::new(PermissionGate::new()),
@@ -342,7 +416,6 @@ impl AgentCore for DefaultAgentCore {
                         .expect("DefaultAgentCore config rwlock poisoned")
                         .clone(),
                 ),
-                hosted_capabilities: resolved.hosted,
                 fs,
                 shell,
                 http: self.http.clone(),
@@ -368,12 +441,60 @@ impl AgentCore for DefaultAgentCore {
     }
 }
 
+impl DefaultAgentCore {
+    /// 按当前 [`TurnConfig::model`] 在 registry 上查 entry，并裁决出
+    /// `(provider, hosted_capabilities)`。供 `create_session` /
+    /// `load_session` 复用。
+    ///
+    /// 配置里的 model 必须能在 registry 中找到 entry——CLI 装配期
+    /// [`ProviderRegistry::new`] 已经校验过 default model，能落到这里报错
+    /// 的只剩 builder 误用（registry 与 turn config 不一致）。
+    fn resolve_initial_provider(&self) -> Result<SessionProviderState, AgentError> {
+        let model = self
+            .config
+            .read()
+            .expect("DefaultAgentCore config rwlock poisoned")
+            .model
+            .clone();
+        let entry = self.registry.entry_for_model(&model).ok_or_else(|| {
+            AgentError::Other(BoxError::new(io::Error::other(format!(
+                "default model `{model}` is not declared by any provider entry in the registry"
+            ))))
+        })?;
+        let provider = entry.provider().clone();
+        let resolved = ResolvedSessionCapabilities::resolve(
+            entry.capabilities(),
+            provider.hosted_capabilities(),
+            &provider.info().vendor,
+        )?;
+        Ok(SessionProviderState {
+            provider,
+            hosted_capabilities: resolved.hosted,
+        })
+    }
+}
+
+/// session 当前选中的真实 provider + 该 provider 的 hosted capability 解析结果。
+///
+/// `set_model` 跨 provider 切换时被原子替换。
+struct SessionProviderState {
+    provider: Arc<dyn LlmProvider>,
+    hosted_capabilities: HostedCapabilities,
+}
+
 pub struct DefaultSession {
     id: SessionId,
     cwd: PathBuf,
     history: Box<dyn History>,
     tools: Arc<dyn ToolRegistry>,
-    provider: Arc<dyn LlmProvider>,
+    /// 全局 provider 目录。session 共享 [`DefaultAgentCore`] 持有的同一份
+    /// `Arc<ProviderRegistry>`——list_models / set_model 的 candidate 与
+    /// owner provider 全靠它解析。
+    registry: Arc<ProviderRegistry>,
+    /// 当前选中的 (provider, hosted_capabilities) 状态。`set_model` 跨
+    /// provider 时整体替换，保证 `(provider, hosted_capabilities)` 总是
+    /// 自洽——不存在"provider 换了但 capabilities 没换"的中间态。
+    provider_state: RwLock<SessionProviderState>,
     policy: Arc<dyn SandboxPolicy>,
     events: Arc<EventEmitter>,
     permissions: Arc<PermissionGate>,
@@ -381,10 +502,6 @@ pub struct DefaultSession {
     /// `None` 表示空闲。`std::sync::Mutex` 仅短暂持锁、不跨 await。
     turn_state: Mutex<TurnSlot>,
     config: RwLock<TurnConfig>,
-    /// session 启动期一次性裁决出的 hosted capability 集合。
-    /// 每次 `run_turn` 装配 [`TurnRunner`] 时直接复用——`(provider, mode)`
-    /// 在 session 生命周期内不变。
-    hosted_capabilities: HostedCapabilities,
     /// session 级 fs 后端。由 [`AgentCore::create_session`] 注入；
     /// `TurnRunner` 把 `&dyn FsBackend` 借到 [`crate::tool::ToolContext`] 传给工具。
     fs: Arc<dyn FsBackend>,
@@ -410,7 +527,22 @@ pub struct DefaultSession {
     request_audit: RequestAuditTracker,
 }
 
-impl DefaultSession {}
+impl DefaultSession {
+    fn current_provider(&self) -> Arc<dyn LlmProvider> {
+        self.provider_state
+            .read()
+            .expect("DefaultSession provider_state rwlock poisoned")
+            .provider
+            .clone()
+    }
+
+    fn current_hosted(&self) -> HostedCapabilities {
+        self.provider_state
+            .read()
+            .expect("DefaultSession provider_state rwlock poisoned")
+            .hosted_capabilities
+    }
+}
 
 #[derive(Default)]
 struct TurnSlot {
@@ -436,7 +568,7 @@ impl Session for DefaultSession {
     }
 
     fn provider_info(&self) -> ProviderInfo {
-        self.provider.info()
+        self.current_provider().info()
     }
 
     fn current_model(&self) -> String {
@@ -449,32 +581,45 @@ impl Session for DefaultSession {
 
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, ProviderError>> {
         Box::pin(async move {
+            // 多 provider 装配下：candidate 集来自 registry——每个 entry
+            // 自带 model 列表（CLI 装配时已经塞进去）。再按 session 的
+            // `allowed_models` 白名单过滤。registry 不发网络请求，这条路径
+            // 永远走得通。
             let allowed_models = self
                 .config
                 .read()
                 .expect("DefaultSession config rwlock poisoned")
                 .allowed_models
                 .clone();
-            match self.provider.list_models().await {
-                Ok(available_models) => Ok(filter_allowed_models(
-                    available_models,
-                    allowed_models.as_deref(),
-                )),
-                Err(err) => match allowed_models {
-                    Some(allowed_models) => {
-                        tracing::warn!(
-                            provider = %self.provider.info().vendor,
-                            error = %err,
-                            "provider list_models failed; falling back to configured allowed models"
-                        );
-                        Ok(fallback_allowed_models(
-                            self.provider.as_ref(),
-                            &allowed_models,
-                        ))
-                    }
-                    None => Err(err),
-                },
-            }
+            let candidates = self.registry.list_candidates();
+            let mut models: Vec<ModelInfo> = candidates
+                .into_iter()
+                .map(|candidate| {
+                    decorate_with_provider_display(candidate.model, &candidate.provider)
+                })
+                .collect();
+            models = filter_allowed_models(models, allowed_models.as_deref());
+            Ok(models)
+        })
+    }
+
+    fn list_candidates(&self) -> BoxFuture<'_, Result<Vec<ModelCandidate>, ProviderError>> {
+        Box::pin(async move {
+            let allowed_models = self
+                .config
+                .read()
+                .expect("DefaultSession config rwlock poisoned")
+                .allowed_models
+                .clone();
+            let candidates = self.registry.list_candidates();
+            let candidates: Vec<ModelCandidate> = match allowed_models {
+                Some(allowed) => candidates
+                    .into_iter()
+                    .filter(|c| allowed.iter().any(|id| id == &c.model.id))
+                    .collect(),
+                None => candidates,
+            };
+            Ok(candidates)
         })
     }
 
@@ -494,25 +639,38 @@ impl Session for DefaultSession {
                 }));
             }
 
-            if self.provider.model_info(&model_id).is_some() {
-                let mut config = self
-                    .config
-                    .write()
-                    .expect("DefaultSession config rwlock poisoned");
-                config.model = model_id;
-                return Ok(());
-            }
-
-            let available_models = self.provider.list_models().await?;
-            let available_models =
-                filter_allowed_models(available_models, allowed_models.as_deref());
-            let known_model = available_models.iter().any(|model| model.id == model_id);
-            if !known_model {
+            let Some(entry) = self.registry.entry_for_model(&model_id) else {
                 return Err(ProviderError::new(ProviderErrorKind::ModelNotFound {
                     model: model_id,
                 }));
-            }
+            };
 
+            // 跨 provider 切换时重新 resolve hosted capabilities：每个 entry
+            // 自带它的 [`SessionCapabilitiesConfig`]，与 provider 的
+            // hosted_capabilities 交叉裁决。Delegate 但 provider 不支持时
+            // 返回 ProviderError——保持 set_model 的失败语义稳定。
+            let new_provider = entry.provider().clone();
+            let resolved = ResolvedSessionCapabilities::resolve(
+                entry.capabilities(),
+                new_provider.hosted_capabilities(),
+                &new_provider.info().vendor,
+            )
+            .map_err(|err| {
+                ProviderError::new(ProviderErrorKind::Other(BoxError::new(io::Error::other(
+                    err.to_string(),
+                ))))
+            })?;
+
+            // 锁顺序：provider_state 先于 config，与 run_turn 的快照路径一致。
+            // 同时持有两把写锁的窗口很短（仅几条赋值），不会阻塞主循环。
+            {
+                let mut state = self
+                    .provider_state
+                    .write()
+                    .expect("DefaultSession provider_state rwlock poisoned");
+                state.provider = new_provider;
+                state.hosted_capabilities = resolved.hosted;
+            }
             let mut config = self
                 .config
                 .write()
@@ -524,6 +682,10 @@ impl Session for DefaultSession {
 
     fn subscribe(&self) -> EventStream {
         self.events.subscribe()
+    }
+
+    fn history_snapshot(&self) -> Vec<Message> {
+        self.history.snapshot()
     }
 
     fn run_turn(&self, prompt: Vec<ContentBlock>) -> BoxFuture<'_, Result<StopReason, TurnError>> {
@@ -560,9 +722,14 @@ impl Session for DefaultSession {
                     .read()
                     .expect("DefaultSession config rwlock poisoned")
                     .clone();
+                // turn 在启动时拍一次 (provider, hosted) 快照——同一 turn
+                // 内即使有并发的 set_model 请求，本 turn 仍走选定的
+                // provider；下一 turn 才生效。
+                let provider = self.current_provider();
+                let hosted = self.current_hosted();
                 let system_prompt = resolve_system_prompt(
                     &self.cwd,
-                    &self.provider.info().vendor,
+                    &provider.info().vendor,
                     &config.model,
                     &config.base_prompt,
                     &config.prompt,
@@ -572,7 +739,7 @@ impl Session for DefaultSession {
                 let runner = TurnRunner {
                     history: self.history.as_ref(),
                     tools: self.tools.as_ref(),
-                    provider: self.provider.as_ref(),
+                    provider: provider.as_ref(),
                     policy: self.policy.as_ref(),
                     events: self.events.clone(),
                     permissions: self.permissions.as_ref(),
@@ -583,7 +750,7 @@ impl Session for DefaultSession {
                     fs: self.fs.clone(),
                     shell: self.shell.clone(),
                     http: self.http.clone(),
-                    hosted_capabilities: self.hosted_capabilities,
+                    hosted_capabilities: hosted,
                     hooks: self.hook_engine.as_ref(),
                     session_id: &self.id,
                     request_audit: &self.request_audit,
@@ -628,23 +795,16 @@ fn filter_allowed_models(
         .collect()
 }
 
-fn fallback_allowed_models(
-    provider: &dyn LlmProvider,
-    allowed_models: &[String],
-) -> Vec<ModelInfo> {
-    allowed_models
-        .iter()
-        .map(|model_id| {
-            provider.model_info(model_id).unwrap_or_else(|| ModelInfo {
-                id: model_id.clone(),
-                display_name: Some(model_id.clone()),
-                context_window: None,
-                max_output_tokens: None,
-                deprecated: false,
-                capabilities_overrides: Default::default(),
-            })
-        })
-        .collect()
+/// 给 model 的 display_name 拼上 provider 前缀，便于 ACP 客户端区分同一
+/// model id 在不同 provider 下的来源（虽然 [`ProviderRegistry::new`] 不允许
+/// 重复 id，但显示层仍然需要"OpenAI: gpt-4o"这样的人读名）。
+fn decorate_with_provider_display(mut model: ModelInfo, provider: &ProviderInfo) -> ModelInfo {
+    let name = model
+        .display_name
+        .clone()
+        .unwrap_or_else(|| model.id.clone());
+    model.display_name = Some(format!("{}: {name}", provider.display_name));
+    model
 }
 
 /// v0 的 session id 生成：进程内单调递增 + 时间戳。引入 uuid crate 时再换。

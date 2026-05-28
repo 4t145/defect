@@ -11,9 +11,10 @@
 //! 3. 配置文件
 //! 4. 默认 `echo`（无外部依赖，便于无凭证环境冒烟）
 //!
-//! 取值：`echo` | `anthropic` | `openai` | `deepseek`。
+//! 取值：`echo` | `anthropic` | `openai` | `deepseek` | `litellm`。
 //! 凭证仍由各 provider 从 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
-//! `DEEPSEEK_API_KEY` 读取。
+//! `DEEPSEEK_API_KEY` / `LITELLM_API_KEY` 读取。
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,10 +22,12 @@ use std::sync::Arc;
 use agent_client_protocol::schema::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use defect_acp::EchoProvider;
 use defect_agent::hooks::builtin::BuiltinRegistry;
-use defect_agent::llm::LlmProvider;
+use defect_agent::llm::{
+    LlmProvider, ModelCapabilityOverrides, ModelInfo, ProviderEntry, ProviderRegistry,
+};
 use defect_agent::policy::{
     AskWritesPolicy, DenyAllPolicy, OpenPolicy, ReadOnlyPolicy, SandboxPolicy,
 };
@@ -34,17 +37,28 @@ use defect_agent::session::{
 use defect_config::{
     CliOverrides, HttpClientConfig, HttpProxyMode, HttpProxySettings, LoadConfigOptions,
     LoadedConfig, McpServerConfig as ConfigMcpServerConfig, ProviderKind as ConfigProviderKind,
-    SandboxMode, load_dotenv_compat, parse_cli_override,
+    ProviderProtocol, ReasoningEffort as ConfigReasoningEffort, SandboxMode, load_dotenv_compat,
+    parse_cli_override,
 };
+use defect_llm::protocol::openai_chat::ReasoningEffort as LlmReasoningEffort;
 use defect_llm::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+use defect_llm::provider::bedrock::{BedrockConfig, BedrockProvider};
 use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 use defect_llm::provider::openai::{OpenAiConfig, OpenAiProvider};
 use defect_mcp::McpToolFactory;
 use defect_storage::StorageObserver;
 use defect_tools::{BashTool, EditFileTool, FetchTool, ReadFileTool, SearchTool, WriteFileTool};
+use http::{HeaderName, HeaderValue};
 use tracing_subscriber::EnvFilter;
 
 mod hooks;
+
+const BEDROCK_PROVIDER: &str = "bedrock";
+const LITELLM_API_KEY_ENV: &str = "LITELLM_API_KEY";
+const LITELLM_DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
+const CUSTOM_OPENAI_DISPLAY_NAME: &str = "Custom OpenAI-compatible";
+const CUSTOM_BEDROCK_DISPLAY_NAME: &str = "Amazon Bedrock";
+const LITELLM_DISPLAY_NAME: &str = "LiteLLM Gateway";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -64,36 +78,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("{warning:?}");
     }
 
-    let (provider, turn_config) = build_provider(&config)?;
+    let (registry, turn_config) = build_registry(&config).await?;
 
-    // 当前 session 绑定的 provider 已确定；按 §6 把全局 capability 与该
-    // provider 的覆写合并，再传给 agent core。其它 provider 的覆写不进入
-    // session（session 不切换 provider）。
-    let session_capabilities = match config.effective.cli.provider {
-        defect_config::ProviderKind::Anthropic => config
-            .effective
-            .providers
-            .anthropic
-            .capabilities
-            .merge_into(config.effective.capabilities),
-        defect_config::ProviderKind::Openai => config
-            .effective
-            .providers
-            .openai
-            .capabilities
-            .merge_into(config.effective.capabilities),
-        defect_config::ProviderKind::Deepseek => config
-            .effective
-            .providers
-            .deepseek
-            .capabilities
-            .merge_into(config.effective.capabilities),
-        defect_config::ProviderKind::Echo => config.effective.capabilities,
-    }
-    .to_session_capabilities();
-
+    let default_entry = registry.default_entry();
     tracing::info!(
-        provider = %provider.info().vendor,
+        provider = %default_entry.provider().info().vendor,
         model = %turn_config.model,
         "starting defect ACP server on stdio"
     );
@@ -110,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("hook engine build failed: {e}"))?;
 
     let agent = DefaultAgentCore::builder()
-        .provider(provider)
+        .registry(registry)
         .process_tools(tools)
         .policy(build_policy(config.effective.sandbox.mode))
         .observe_session(storage.clone())
@@ -119,7 +108,6 @@ async fn main() -> anyhow::Result<()> {
             build_default_mcp_servers(&config),
         )))
         .config(turn_config)
-        .capabilities(session_capabilities)
         .http(http_client)
         .hook_engine(hook_engine)
         .build();
@@ -140,8 +128,8 @@ async fn main() -> anyhow::Result<()> {
 )]
 struct CliArgs {
     /// LLM provider to use. CLI flag wins over DEFECT_PROVIDER env and config.
-    #[arg(long, value_enum, env = "DEFECT_PROVIDER")]
-    provider: Option<ProviderKind>,
+    #[arg(long, env = "DEFECT_PROVIDER")]
+    provider: Option<String>,
 
     /// Override the default model id. CLI flag wins over DEFECT_MODEL env.
     #[arg(long, env = "DEFECT_MODEL")]
@@ -152,14 +140,6 @@ struct CliArgs {
     config_override: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum ProviderKind {
-    Echo,
-    Anthropic,
-    Openai,
-    Deepseek,
-}
-
 impl CliArgs {
     fn to_overrides(&self) -> anyhow::Result<CliOverrides> {
         let config_overrides = self
@@ -168,47 +148,357 @@ impl CliArgs {
             .map(|spec| parse_cli_override(spec).map_err(|e| anyhow::anyhow!("{e}")))
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(CliOverrides {
-            provider: self.provider.map(Into::into),
+            provider: self.provider.as_deref().map(ConfigProviderKind::from),
             model: self.model.clone(),
             config_overrides,
         })
     }
 }
 
-fn build_provider(config: &LoadedConfig) -> anyhow::Result<(Arc<dyn LlmProvider>, TurnConfig)> {
+async fn build_registry(
+    config: &LoadedConfig,
+) -> anyhow::Result<(Arc<ProviderRegistry>, TurnConfig)> {
     let http_config = build_http_stack_config(&config.effective.http)?;
-    let provider: Arc<dyn LlmProvider> = match config.effective.cli.provider {
-        ConfigProviderKind::Echo => Arc::new(EchoProvider::new()) as Arc<dyn LlmProvider>,
-        ConfigProviderKind::Anthropic => Arc::new(
+    let entries = build_provider_entries(config, http_config).await?;
+    let turn_config = config.effective.turn.clone();
+    let registry = ProviderRegistry::new(entries, &turn_config.model)
+        .map_err(|e| anyhow::anyhow!("provider registry init failed: {e}"))?;
+    Ok((Arc::new(registry), turn_config))
+}
+
+async fn build_single_llm_provider(
+    provider_kind: &ConfigProviderKind,
+    config: &LoadedConfig,
+    http_config: defect_http::HttpStackConfig,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    match provider_kind {
+        ConfigProviderKind::Echo => Ok(Arc::new(EchoProvider::new()) as Arc<dyn LlmProvider>),
+        ConfigProviderKind::Anthropic => Ok(Arc::new(
             AnthropicProvider::new(AnthropicConfig {
                 api_key: None,
+                api_key_env: config.effective.providers.anthropic.api_key_env.clone(),
                 base_url: config.effective.providers.anthropic.base_url.clone(),
-                http: http_config.clone(),
+                http: http_config,
             })
             .map_err(|e| anyhow::anyhow!("anthropic provider init failed: {e}"))?,
-        ) as Arc<dyn LlmProvider>,
-        ConfigProviderKind::Openai => Arc::new(
-            OpenAiProvider::new(OpenAiConfig {
-                api_key: None,
-                base_url: config.effective.providers.openai.base_url.clone(),
-                organization: config.effective.providers.openai.organization.clone(),
-                project: config.effective.providers.openai.project.clone(),
-                capabilities_override: None,
-                http: http_config.clone(),
-            })
-            .map_err(|e| anyhow::anyhow!("openai provider init failed: {e}"))?,
-        ) as Arc<dyn LlmProvider>,
-        ConfigProviderKind::Deepseek => Arc::new(
+        ) as Arc<dyn LlmProvider>),
+        ConfigProviderKind::Openai => build_openai_provider(
+            "openai",
+            "OpenAI Chat Completions",
+            config.effective.providers.openai.clone(),
+            http_config,
+        ),
+        ConfigProviderKind::Deepseek => Ok(Arc::new(
             DeepSeekProvider::new(DeepSeekConfig {
                 api_key: None,
+                api_key_env: config.effective.providers.deepseek.api_key_env.clone(),
                 base_url: config.effective.providers.deepseek.base_url.clone(),
+                reasoning_effort: config
+                    .effective
+                    .providers
+                    .deepseek
+                    .reasoning_effort
+                    .map(map_reasoning_effort),
                 http: http_config,
             })
             .map_err(|e| anyhow::anyhow!("deepseek provider init failed: {e}"))?,
-        ) as Arc<dyn LlmProvider>,
-    };
+        ) as Arc<dyn LlmProvider>),
+        ConfigProviderKind::Litellm => {
+            build_litellm_provider(config.effective.providers.litellm.clone(), http_config)
+        }
+        ConfigProviderKind::Custom(name) => {
+            let Some(provider) = config
+                .effective
+                .providers
+                .get(&ConfigProviderKind::Custom(name.clone()))
+            else {
+                return Err(anyhow::anyhow!("missing [providers.{name}] configuration"));
+            };
+            // 协议默认值：bedrock / aws 段存在 → anthropic-messages；
+            // 否则按 OpenAI Chat。这条派遣前没有兜底——`bedrock` 习惯写
+            // `[providers.bedrock] aws = { ... }` 不显式标 protocol，被默认
+            // 路由到 OpenAI builder 后报 "missing OPENAI_API_KEY"，与实际
+            // 配置完全不沾边。详见此 commit。
+            let protocol = provider.protocol.unwrap_or_else(|| {
+                if name == BEDROCK_PROVIDER || provider.aws.is_some() {
+                    ProviderProtocol::AnthropicMessages
+                } else {
+                    ProviderProtocol::OpenaiChat
+                }
+            });
+            match protocol {
+                ProviderProtocol::OpenaiChat => build_openai_provider(
+                    name,
+                    provider
+                        .display_name
+                        .as_deref()
+                        .unwrap_or(CUSTOM_OPENAI_DISPLAY_NAME),
+                    provider.clone(),
+                    http_config,
+                ),
+                ProviderProtocol::AnthropicMessages => {
+                    if name == BEDROCK_PROVIDER || provider.aws.is_some() {
+                        build_bedrock_provider(name, provider.clone()).await
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "custom provider `{name}` uses protocol `anthropic-messages`, \
+                             but only AWS Bedrock transport is implemented for custom providers"
+                        ))
+                    }
+                }
+            }
+        }
+    }
+}
 
-    Ok((provider, config.effective.turn.clone()))
+async fn build_provider_entries(
+    config: &LoadedConfig,
+    http_config: defect_http::HttpStackConfig,
+) -> anyhow::Result<Vec<ProviderEntry>> {
+    let default_kind = config.effective.cli.provider.clone();
+    let default_provider =
+        build_single_llm_provider(&default_kind, config, http_config.clone()).await?;
+    let mut entries = vec![ProviderEntry::new(
+        default_provider,
+        entry_models(
+            provider_config_for_kind(&config.effective.providers, &default_kind),
+            Some(config.effective.turn.model.as_str()),
+        ),
+        provider_session_capabilities(config, &default_kind),
+    )];
+
+    for provider_kind in configured_entry_kinds(config) {
+        if provider_kind == default_kind {
+            continue;
+        }
+        let models = entry_models(
+            provider_config_for_kind(&config.effective.providers, &provider_kind),
+            None,
+        );
+        if models.is_empty() {
+            continue;
+        }
+        let provider =
+            build_single_llm_provider(&provider_kind, config, http_config.clone()).await?;
+        entries.push(ProviderEntry::new(
+            provider,
+            models,
+            provider_session_capabilities(config, &provider_kind),
+        ));
+    }
+
+    Ok(entries)
+}
+
+/// 把全局 [`capabilities`] 与 `providers.<p>.capabilities` 合并，再投影成
+/// agent 侧的 [`SessionCapabilitiesConfig`]。供每个 entry 自带——这样
+/// session 跨 provider 切 model 时也能拿到正确的 capability 配置。
+///
+/// [`capabilities`]: defect_config::CapabilitiesConfig
+fn provider_session_capabilities(
+    config: &LoadedConfig,
+    provider: &ConfigProviderKind,
+) -> defect_agent::session::SessionCapabilitiesConfig {
+    match provider {
+        ConfigProviderKind::Anthropic => config
+            .effective
+            .providers
+            .anthropic
+            .capabilities
+            .merge_into(config.effective.capabilities),
+        ConfigProviderKind::Openai => config
+            .effective
+            .providers
+            .openai
+            .capabilities
+            .merge_into(config.effective.capabilities),
+        ConfigProviderKind::Deepseek => config
+            .effective
+            .providers
+            .deepseek
+            .capabilities
+            .merge_into(config.effective.capabilities),
+        ConfigProviderKind::Litellm => config
+            .effective
+            .providers
+            .litellm
+            .capabilities
+            .merge_into(config.effective.capabilities),
+        ConfigProviderKind::Echo => config.effective.capabilities,
+        ConfigProviderKind::Custom(name) => config
+            .effective
+            .providers
+            .get(&ConfigProviderKind::Custom(name.clone()))
+            .map(|provider| {
+                provider
+                    .capabilities
+                    .merge_into(config.effective.capabilities)
+            })
+            .unwrap_or(config.effective.capabilities),
+    }
+    .to_session_capabilities()
+}
+
+fn configured_entry_kinds(config: &LoadedConfig) -> Vec<ConfigProviderKind> {
+    let mut kinds = vec![
+        ConfigProviderKind::Anthropic,
+        ConfigProviderKind::Openai,
+        ConfigProviderKind::Deepseek,
+        ConfigProviderKind::Litellm,
+    ];
+    kinds.extend(
+        config
+            .effective
+            .providers
+            .custom
+            .keys()
+            .cloned()
+            .map(ConfigProviderKind::Custom),
+    );
+    kinds
+}
+
+fn provider_config_for_kind<'a>(
+    providers: &'a defect_config::ProviderConfigs,
+    kind: &ConfigProviderKind,
+) -> Option<&'a defect_config::ProviderConfigFile> {
+    providers.get(kind)
+}
+
+fn entry_models(
+    provider: Option<&defect_config::ProviderConfigFile>,
+    fallback_model: Option<&str>,
+) -> Vec<ModelInfo> {
+    let mut ids = Vec::new();
+    if let Some(provider) = provider {
+        if let Some(default_model) = &provider.default_model {
+            ids.push(default_model.clone());
+        }
+        if let Some(models) = &provider.models {
+            append_unique_model_ids(&mut ids, models.iter().cloned());
+        }
+    }
+    if ids.is_empty()
+        && let Some(fallback_model) = fallback_model
+    {
+        ids.push(fallback_model.to_string());
+    }
+    ids.into_iter().map(model_info_from_id).collect()
+}
+
+fn append_unique_model_ids(target: &mut Vec<String>, source: impl IntoIterator<Item = String>) {
+    for model in source {
+        if !target.iter().any(|existing| existing == &model) {
+            target.push(model);
+        }
+    }
+}
+
+fn model_info_from_id(id: String) -> ModelInfo {
+    ModelInfo {
+        id,
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        deprecated: false,
+        capabilities_overrides: ModelCapabilityOverrides::default(),
+    }
+}
+
+fn build_litellm_provider(
+    provider: defect_config::ProviderConfigFile,
+    http_config: defect_http::HttpStackConfig,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let provider = ProviderDefaults {
+        base_url: LITELLM_DEFAULT_BASE_URL,
+        api_key_env: LITELLM_API_KEY_ENV,
+    }
+    .apply(provider);
+    build_openai_provider("litellm", LITELLM_DISPLAY_NAME, provider, http_config)
+}
+
+async fn build_bedrock_provider(
+    vendor: &str,
+    provider: defect_config::ProviderConfigFile,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let aws = provider.aws.unwrap_or_default();
+    let provider = BedrockProvider::new(BedrockConfig {
+        vendor: Some(vendor.to_string()),
+        display_name: Some(
+            provider
+                .display_name
+                .unwrap_or_else(|| CUSTOM_BEDROCK_DISPLAY_NAME.to_string()),
+        ),
+        base_url: provider.base_url,
+        default_model: provider.default_model,
+        models: provider.models.unwrap_or_default(),
+        aws_profile: aws.profile,
+        aws_region: aws.region,
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("{vendor} provider init failed: {e}"))?;
+    Ok(Arc::new(provider) as Arc<dyn LlmProvider>)
+}
+
+fn build_openai_provider(
+    vendor: &str,
+    display_name: &str,
+    provider: defect_config::ProviderConfigFile,
+    http_config: defect_http::HttpStackConfig,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let provider = OpenAiProvider::new(OpenAiConfig {
+        api_key: provider
+            .api_key_env
+            .as_deref()
+            .and_then(|env| std::env::var(env).ok()),
+        base_url: provider.base_url,
+        organization: provider.organization,
+        project: provider.project,
+        vendor: vendor.to_string(),
+        display_name: display_name.to_string(),
+        api_key_env: provider.api_key_env,
+        headers: provider_headers(provider.headers)?,
+        capabilities_override: None,
+        reasoning_effort: provider.reasoning_effort.map(map_reasoning_effort),
+        chat_dialect: defect_llm::protocol::openai_chat::ChatDialect::OpenAi,
+        http: http_config,
+    })
+    .map_err(|e| anyhow::anyhow!("{vendor} provider init failed: {e}"))?;
+    Ok(Arc::new(provider) as Arc<dyn LlmProvider>)
+}
+
+struct ProviderDefaults {
+    base_url: &'static str,
+    api_key_env: &'static str,
+}
+
+impl ProviderDefaults {
+    fn apply(
+        self,
+        mut provider: defect_config::ProviderConfigFile,
+    ) -> defect_config::ProviderConfigFile {
+        provider
+            .base_url
+            .get_or_insert_with(|| self.base_url.to_string());
+        provider
+            .api_key_env
+            .get_or_insert_with(|| self.api_key_env.to_string());
+        provider
+    }
+}
+
+fn provider_headers(
+    headers: std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<HashMap<HeaderName, HeaderValue>> {
+    let mut parsed = HashMap::with_capacity(headers.len());
+    for (name, value) in headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|e| anyhow::anyhow!("invalid provider header name `{name}`: {e}"))?;
+        let header_value = HeaderValue::from_str(&value)
+            .map_err(|e| anyhow::anyhow!("invalid provider header value for `{name}`: {e}"))?;
+        parsed.insert(header_name, header_value);
+    }
+    Ok(parsed)
 }
 
 /// 把 `defect-config` 的 typed 配置翻译成 `defect_http::HttpStackConfig`。
@@ -360,14 +650,14 @@ fn default_sessions_root() -> anyhow::Result<std::path::PathBuf> {
     ))
 }
 
-impl From<ProviderKind> for ConfigProviderKind {
-    fn from(value: ProviderKind) -> Self {
-        match value {
-            ProviderKind::Echo => Self::Echo,
-            ProviderKind::Anthropic => Self::Anthropic,
-            ProviderKind::Openai => Self::Openai,
-            ProviderKind::Deepseek => Self::Deepseek,
-        }
+fn map_reasoning_effort(value: ConfigReasoningEffort) -> LlmReasoningEffort {
+    match value {
+        ConfigReasoningEffort::None => LlmReasoningEffort::None,
+        ConfigReasoningEffort::Minimal => LlmReasoningEffort::Minimal,
+        ConfigReasoningEffort::Low => LlmReasoningEffort::Low,
+        ConfigReasoningEffort::Medium => LlmReasoningEffort::Medium,
+        ConfigReasoningEffort::High => LlmReasoningEffort::High,
+        ConfigReasoningEffort::Xhigh => LlmReasoningEffort::Xhigh,
     }
 }
 

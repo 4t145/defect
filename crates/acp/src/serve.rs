@@ -18,7 +18,7 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Stdio};
 use defect_agent::event::{AgentEvent, PermissionResolution};
 use defect_agent::fs::FsBackend;
-use defect_agent::llm::{ModelInfo, ProviderError, ProviderInfo};
+use defect_agent::llm::{ModelCandidate, ModelInfo, ProviderError, ProviderInfo};
 use defect_agent::session::{AgentCore, AgentError, Session, TurnError, uuid_like};
 use defect_agent::shell::ShellBackend;
 use defect_tools::{LocalFsBackend, LocalShellBackend};
@@ -26,7 +26,7 @@ use futures::StreamExt;
 use serde_json::json;
 
 use crate::fs::AcpFsBackend;
-use crate::project::{PermissionAsk, Projection, project};
+use crate::project::{PermissionAsk, Projection, project, replay_notifications};
 use crate::shell::AcpShellBackend;
 
 /// 客户端 fs 能力协商结果（连接级）。
@@ -240,12 +240,12 @@ fn provider_error_data(err: &ProviderError) -> serde_json::Value {
 
 async fn session_model_state(session: &dyn Session) -> Option<SessionModelState> {
     let current_model = session.current_model().to_string();
-    let provider = session.provider_info();
-    let available_models = match session.list_models().await {
+    let current_provider = session.provider_info();
+    let candidates = match session.list_candidates().await {
         Ok(models) => models,
         Err(err) => {
             tracing::warn!(
-                provider = %provider.vendor,
+                provider = %current_provider.vendor,
                 model = %current_model,
                 error = %err,
                 "failed to load ACP session model candidates; falling back to current model only"
@@ -256,32 +256,36 @@ async fn session_model_state(session: &dyn Session) -> Option<SessionModelState>
 
     Some(SessionModelState::new(
         ModelId::new(current_model.clone()),
-        acp_model_candidates(provider, &current_model, available_models),
+        acp_model_candidates(&current_provider, &current_model, candidates),
     ))
 }
 
 fn acp_model_candidates(
-    provider: ProviderInfo,
+    current_provider: &ProviderInfo,
     current_model: &str,
-    available_models: Vec<ModelInfo>,
+    candidates: Vec<ModelCandidate>,
 ) -> Vec<AcpModelInfo> {
-    let mut candidates = available_models
+    let mut acp_candidates = candidates
         .into_iter()
-        .map(|model| acp_model_info(&provider, model))
+        .map(|candidate| acp_model_info(&candidate.provider, candidate.model))
         .collect::<Vec<_>>();
 
-    let has_current_model = candidates
+    let has_current_model = acp_candidates
         .iter()
         .any(|candidate| candidate.model_id.0.as_ref() == current_model);
     if !has_current_model {
-        candidates.insert(
+        // 兜底：registry 没有声明当前 model（理论不会发生——session 启动
+        // 时 model 必须落在某个 entry 上）。仍然把当前 model 渲染出来以便
+        // 客户端 UI 不至于看到一个空 dropdown。
+        acp_candidates.insert(
             0,
-            AcpModelInfo::new(current_model.to_string(), current_model.to_string())
-                .description(Some(provider_model_description(&provider, None, false))),
+            AcpModelInfo::new(current_model.to_string(), current_model.to_string()).description(
+                Some(provider_model_description(current_provider, None, false)),
+            ),
         );
     }
 
-    candidates
+    acp_candidates
 }
 
 fn acp_model_info(provider: &ProviderInfo, model: ModelInfo) -> AcpModelInfo {
@@ -462,9 +466,14 @@ impl ServeState {
         let cwd_for_log = req.cwd.clone();
         let fs = self.fs_backend(&cx, &session_id, &req.cwd);
         let shell = self.shell_backend(&cx, &session_id, &req.cwd);
-        match self.agent.load_session(session_id, fs, shell).await {
+        match self.agent.load_session(session_id.clone(), fs, shell).await {
             Ok(session) => {
                 let models = session_model_state(session.as_ref()).await;
+                for notification in replay_notifications(&session_id, &session.history_snapshot()) {
+                    if let Err(err) = cx.send_notification(notification) {
+                        tracing::warn!(?err, "failed to replay loaded session transcript");
+                    }
+                }
                 tracing::info!(
                     session_id = %short_session_id(session.id()),
                     cwd = %cwd_for_log.display(),

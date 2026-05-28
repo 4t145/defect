@@ -201,6 +201,98 @@ fn encode_request_carries_sampling_and_thinking() {
 }
 
 #[test]
+fn encode_request_full_overrides_reasoning_effort_regardless_of_thinking() {
+    // thinking::Disabled 时 wire 默认不带 reasoning_effort；override = High
+    // 仍要写到 wire。同时校验另一档 Xhigh 能被发出去。
+    let mut req = CompletionRequest {
+        model: "gpt-5.1".into(),
+        system: None,
+        messages: vec![Message {
+            role: Role::User,
+            content: vec![MessageContent::Text { text: "x".into() }],
+        }],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+    let w = encode_request_full(&req, ThinkingEcho::Forbidden, Some(ReasoningEffort::High));
+    assert!(matches!(
+        w.reasoning_effort,
+        Some(wire::ReasoningEffort::ReasoningEffortVariant0(
+            wire::ReasoningEffortVariant0::High
+        ))
+    ));
+
+    // override 还应该胜过 thinking::Enabled 的 Medium 默认值。
+    req.sampling.thinking = ThinkingConfig::Enabled {
+        budget_tokens: Some(1024),
+    };
+    let w = encode_request_full(&req, ThinkingEcho::Forbidden, Some(ReasoningEffort::Xhigh));
+    assert!(matches!(
+        w.reasoning_effort,
+        Some(wire::ReasoningEffort::ReasoningEffortVariant0(
+            wire::ReasoningEffortVariant0::Xhigh
+        ))
+    ));
+}
+
+#[test]
+fn encode_deepseek_dialect_uses_legacy_max_tokens_without_prompt_cache_key() {
+    let req = CompletionRequest {
+        model: "deepseek-v4-flash".into(),
+        system: Some("you are helpful".into()),
+        messages: vec![Message {
+            role: Role::User,
+            content: vec![MessageContent::Text { text: "x".into() }],
+        }],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams {
+            max_tokens: Some(8000),
+            ..SamplingParams::default()
+        },
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+
+    let w = encode_request_with_dialect(&req, ThinkingEcho::Forbidden, None, ChatDialect::DeepSeek);
+
+    #[allow(deprecated)]
+    {
+        assert_eq!(w.max_tokens, Some(8000));
+    }
+    assert!(w.max_completion_tokens.is_none());
+    assert!(w.prompt_cache_key.is_none());
+}
+
+#[test]
+fn encode_deepseek_dialect_writes_empty_reasoning_content_on_assistant_messages() {
+    let req = CompletionRequest {
+        model: "deepseek-v4-flash".into(),
+        system: None,
+        messages: vec![Message {
+            role: Role::Assistant,
+            content: vec![MessageContent::Text {
+                text: "answer".into(),
+            }],
+        }],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+
+    let w = encode_request_with_dialect(&req, ThinkingEcho::Forbidden, None, ChatDialect::DeepSeek);
+    let wire::ChatCompletionRequestMessage::ChatCompletionRequestAssistantMessage(asst) =
+        &w.messages[0]
+    else {
+        panic!("expected assistant message");
+    };
+
+    assert_eq!(asst.reasoning_content.as_deref(), Some(""));
+}
+
+#[test]
 fn encode_request_sets_stable_prompt_cache_key_from_prefix_shape() {
     let req = CompletionRequest {
         model: "gpt-4o-mini".into(),

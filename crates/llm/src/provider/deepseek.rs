@@ -6,6 +6,7 @@
 //! 缺少 OpenAI OAS 中要求的 `created` 字段，不能直接复用 OpenAI 生成的
 //! wire 类型。
 
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 
@@ -24,6 +25,7 @@ use tower::Service;
 
 use super::openai::{OpenAiConfig, OpenAiProvider};
 use crate::protocol::deepseek_chat;
+use crate::protocol::openai_chat::{ChatDialect, ReasoningEffort};
 use defect_http::HttpStackConfig;
 
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
@@ -34,7 +36,13 @@ const BASE_URL_ENV: &str = "DEEPSEEK_BASE_URL";
 #[derive(Debug, Default, Clone)]
 pub struct DeepSeekConfig {
     pub api_key: Option<String>,
+    /// 覆盖默认的 `DEEPSEEK_API_KEY` 环境变量名。语义同
+    /// [`super::openai::OpenAiConfig::api_key_env`]。
+    pub api_key_env: Option<String>,
     pub base_url: Option<String>,
+    /// `reasoning_effort` 覆盖；语义同
+    /// [`super::openai::OpenAiConfig::reasoning_effort`]。
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub http: HttpStackConfig,
 }
 
@@ -42,15 +50,24 @@ impl DeepSeekConfig {
     pub fn from_env() -> Self {
         Self {
             api_key: env::var(API_KEY_ENV).ok(),
+            api_key_env: None,
             base_url: env::var(BASE_URL_ENV).ok(),
+            reasoning_effort: None,
             http: HttpStackConfig::default(),
         }
     }
 
     fn resolve_api_key(&self) -> Option<String> {
-        self.api_key
-            .clone()
-            .or_else(|| env::var(API_KEY_ENV).ok())
+        if let Some(api_key) = self.api_key.clone() {
+            return Some(api_key);
+        }
+        if let Some(env_name) = self.api_key_env.as_deref()
+            && let Ok(v) = env::var(env_name)
+        {
+            return Some(v);
+        }
+        env::var(API_KEY_ENV)
+            .ok()
             .or_else(|| env::var("OPENAI_API_KEY").ok())
     }
 
@@ -76,10 +93,16 @@ impl DeepSeekProvider {
     pub fn new(config: DeepSeekConfig) -> Result<Self, ProviderError> {
         let openai_cfg = OpenAiConfig {
             api_key: config.resolve_api_key(),
+            api_key_env: None,
             base_url: Some(config.resolve_base_url()),
             organization: None,
             project: None,
+            vendor: "deepseek".into(),
+            display_name: "DeepSeek Chat".into(),
+            headers: HashMap::new(),
             capabilities_override: Some(default_deepseek_capabilities()),
+            reasoning_effort: config.reasoning_effort,
+            chat_dialect: ChatDialect::DeepSeek,
             http: config.http,
         };
         let inner = Arc::new(OpenAiProvider::new(openai_cfg)?);

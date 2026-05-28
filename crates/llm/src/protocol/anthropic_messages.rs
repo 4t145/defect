@@ -20,7 +20,7 @@ use defect_agent::llm::{
     ProviderErrorKind, Role, StopReason, ThinkingConfig, ToolChoice, ToolResultBody, Usage,
 };
 use defect_agent::tool::ToolSchema;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use sse_stream::Sse;
 use toac::body::codec::sse::SseEventStream;
 use tokio_util::sync::CancellationToken;
@@ -403,17 +403,32 @@ where
     S: Stream<Item = Result<Sse, E>> + Send + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
+    let sse = sse.map(|item| {
+        item.map_err(|e| ProviderError::new(ProviderErrorKind::Transport(BoxError::new(e))))
+    });
+    decode_stream_provider_errors(sse, cancel)
+}
+
+/// 与 [`decode_stream_generic`] 同形态，但入参错误已统一成
+/// [`ProviderError`]。Bedrock 这类非 SSE transport 会在 event-stream 层
+/// 产生已分类错误，直接走此入口复用 Anthropic 状态机。
+pub fn decode_stream_provider_errors<S>(
+    sse: S,
+    cancel: CancellationToken,
+) -> impl Stream<Item = Result<ProviderChunk, ProviderError>> + Send
+where
+    S: Stream<Item = Result<Sse, ProviderError>> + Send + 'static,
+{
     AnthropicSseDecoder {
         inner: sse,
         cancel,
         state: DecoderState::default(),
         pending: Vec::new(),
         finished: false,
-        _err: std::marker::PhantomData::<E>,
     }
 }
 
-struct AnthropicSseDecoder<S, E> {
+struct AnthropicSseDecoder<S> {
     inner: S,
     cancel: CancellationToken,
     state: DecoderState,
@@ -421,19 +436,17 @@ struct AnthropicSseDecoder<S, E> {
     /// MessageStart + Usage）。先存到 `pending`，逐个吐。
     pending: Vec<Result<ProviderChunk, ProviderError>>,
     finished: bool,
-    _err: std::marker::PhantomData<E>,
 }
 
-impl<S, E> Stream for AnthropicSseDecoder<S, E>
+impl<S> Stream for AnthropicSseDecoder<S>
 where
-    S: Stream<Item = Result<Sse, E>>,
-    E: std::error::Error + Send + Sync + 'static,
+    S: Stream<Item = Result<Sse, ProviderError>>,
 {
     type Item = Result<ProviderChunk, ProviderError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // SAFETY: standard pin-projection through a single field. We
-        // never move `inner` out and `_err` is a zero-sized PhantomData.
+        // SAFETY: standard pin-projection through a single field. We never
+        // move `inner` out.
         let this = unsafe { self.get_unchecked_mut() };
         loop {
             if let Some(item) = this.pending.pop() {
@@ -464,9 +477,7 @@ where
                 }
                 Poll::Ready(Some(Err(e))) => {
                     this.finished = true;
-                    return Poll::Ready(Some(Err(ProviderError::new(
-                        ProviderErrorKind::Transport(BoxError::new(e)),
-                    ))));
+                    return Poll::Ready(Some(Err(e)));
                 }
                 Poll::Ready(Some(Ok(sse))) => {
                     process_sse(&mut this.state, sse, &mut this.pending);

@@ -18,14 +18,14 @@ use defect_agent::llm::{
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use http::HeaderValue;
+use http::{HeaderName, HeaderValue};
 use toac::body::codec::sse::SseEventStream;
 use toac::{ApiClient, CallError, MakeRequest, Operation, Request as ToacRequest};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tower::Service;
 
-use crate::protocol::openai_chat;
+use crate::protocol::openai_chat::{self, ChatDialect, ReasoningEffort};
 use crate::wire::openai::{
     components as wire,
     operations::{chat::completions as chat_completions, models},
@@ -50,10 +50,18 @@ pub(crate) type Client = ApiClient<HttpStack>;
 #[derive(Debug, Default, Clone)]
 pub struct OpenAiConfig {
     pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
     pub base_url: Option<String>,
     pub organization: Option<String>,
     pub project: Option<String>,
+    pub vendor: String,
+    pub display_name: String,
+    pub headers: HashMap<HeaderName, HeaderValue>,
     pub capabilities_override: Option<Capabilities>,
+    /// `reasoning_effort` 覆盖。`Some(_)` 时无视 [`crate::protocol::openai_chat`]
+    /// 默认从 `ThinkingConfig` 推导出的等级，强制写入 wire。
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub chat_dialect: ChatDialect,
     pub http: HttpStackConfig,
 }
 
@@ -61,10 +69,16 @@ impl OpenAiConfig {
     pub fn from_env() -> Self {
         Self {
             api_key: env::var(API_KEY_ENV).ok(),
+            api_key_env: None,
             base_url: env::var(BASE_URL_ENV).ok(),
             organization: env::var(ORG_ENV).ok(),
             project: env::var(PROJECT_ENV).ok(),
             capabilities_override: None,
+            reasoning_effort: None,
+            chat_dialect: ChatDialect::OpenAi,
+            vendor: "openai".into(),
+            display_name: "OpenAI Chat Completions".into(),
+            headers: HashMap::new(),
             http: HttpStackConfig::default(),
         }
     }
@@ -75,14 +89,15 @@ impl OpenAiConfig {
     }
 
     fn resolve_api_key(&self) -> Result<String, ProviderError> {
-        self.api_key
-            .clone()
-            .or_else(|| env::var(API_KEY_ENV).ok())
-            .ok_or_else(|| {
-                ProviderError::new(ProviderErrorKind::AuthMissing {
-                    var_hint: Some(API_KEY_ENV.into()),
-                })
+        if let Some(api_key) = self.api_key.clone() {
+            return Ok(api_key);
+        }
+        let env_name = self.api_key_env.as_deref().unwrap_or(API_KEY_ENV);
+        env::var(env_name).map_err(|_| {
+            ProviderError::new(ProviderErrorKind::AuthMissing {
+                var_hint: Some(env_name.into()),
             })
+        })
     }
 
     fn resolve_base_url(&self) -> String {
@@ -107,6 +122,9 @@ pub struct OpenAiProvider {
     capabilities: Capabilities,
     organization: Option<String>,
     project: Option<String>,
+    headers: HashMap<HeaderName, HeaderValue>,
+    reasoning_effort: Option<ReasoningEffort>,
+    chat_dialect: ChatDialect,
     models: Arc<RwLock<Option<Vec<ModelInfo>>>>,
 }
 
@@ -117,6 +135,7 @@ impl std::fmt::Debug for OpenAiProvider {
             .field("capabilities", &self.capabilities)
             .field("organization", &self.organization)
             .field("project", &self.project)
+            .field("headers", &self.headers.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -130,6 +149,8 @@ impl OpenAiProvider {
         let capabilities = config
             .capabilities_override
             .unwrap_or(default_openai_capabilities());
+        let reasoning_effort = config.reasoning_effort;
+        let chat_dialect = config.chat_dialect;
 
         let auth = security::AuthConfig::builder().api_key_auth(token).build();
         let http = build_http_stack(config.http)
@@ -139,13 +160,16 @@ impl OpenAiProvider {
         Ok(Self {
             client,
             info: ProviderInfo {
-                vendor: "openai".into(),
+                vendor: config.vendor,
                 protocol: ProtocolId::OpenAiChat,
-                display_name: "OpenAI Chat Completions".into(),
+                display_name: config.display_name,
             },
             capabilities,
             organization,
             project,
+            headers: config.headers,
+            reasoning_effort,
+            chat_dialect,
             models: Arc::default(),
         })
     }
@@ -278,6 +302,7 @@ impl OpenAiProvider {
             op,
             organization: self.organization.clone(),
             project: self.project.clone(),
+            headers: self.headers.clone(),
         }
     }
 
@@ -302,7 +327,12 @@ impl OpenAiProvider {
         cancel: CancellationToken,
     ) -> Result<SseEventStream, ProviderError> {
         let echo_mode = self.thinking_echo_for_model(&req.model);
-        let body = openai_chat::encode_request_with_echo(&req, echo_mode);
+        let body = openai_chat::encode_request_with_dialect(
+            &req,
+            echo_mode,
+            self.reasoning_effort,
+            self.chat_dialect,
+        );
         let op = self
             .with_openai_headers(chat_completions::post::Request { body })
             .with_accept(HeaderValue::from_static("text/event-stream"));
@@ -369,6 +399,7 @@ struct WithOpenAiHeaders<Op> {
     op: Op,
     organization: Option<String>,
     project: Option<String>,
+    headers: HashMap<HeaderName, HeaderValue>,
 }
 
 impl<Op> MakeRequest for WithOpenAiHeaders<Op>
@@ -395,6 +426,7 @@ where
                 req.headers_mut()
                     .insert(http::HeaderName::from_static("openai-project"), v);
             }
+            req.headers_mut().extend(self.headers);
             Ok(req)
         }
     }

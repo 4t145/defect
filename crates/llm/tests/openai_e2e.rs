@@ -39,12 +39,18 @@ const DONE: &str = "[DONE]";
 fn provider_for(server_uri: &str) -> Arc<dyn LlmProvider> {
     let cfg = OpenAiConfig {
         api_key: Some(TEST_API_KEY.to_string()),
+        api_key_env: None,
         // base_url 已经包含 /v1 前缀（wire spec server 也是这样）。
         // wiremock 不需要这个前缀，所以 base_url 直接指 server.uri()。
         base_url: Some(server_uri.to_string()),
         organization: None,
         project: None,
+        vendor: "openai".to_string(),
+        display_name: "OpenAI Chat Completions".to_string(),
+        headers: std::collections::HashMap::new(),
         capabilities_override: None,
+        reasoning_effort: None,
+        chat_dialect: defect_llm::protocol::openai_chat::ChatDialect::OpenAi,
         http: defect_http::HttpStackConfig::default(),
     };
     Arc::new(OpenAiProvider::new(cfg).expect("provider")) as Arc<dyn LlmProvider>

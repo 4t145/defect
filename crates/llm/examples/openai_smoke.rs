@@ -58,10 +58,16 @@ async fn main() {
 
     let provider: Arc<dyn LlmProvider> = match OpenAiProvider::new(OpenAiConfig {
         api_key: Some(api_key),
+        api_key_env: None,
         base_url,
         organization,
         project,
+        vendor: "openai".to_string(),
+        display_name: "OpenAI Chat Completions".to_string(),
+        headers: std::collections::HashMap::new(),
         capabilities_override: None,
+        reasoning_effort: None,
+        chat_dialect: defect_llm::protocol::openai_chat::ChatDialect::OpenAi,
         http: defect_http::HttpStackConfig::default(),
     }) {
         Ok(p) => Arc::new(p),

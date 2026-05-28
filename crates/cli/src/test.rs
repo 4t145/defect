@@ -1,8 +1,8 @@
-use super::build_policy;
+use super::{LITELLM_API_KEY_ENV, LITELLM_DEFAULT_BASE_URL, ProviderDefaults, build_policy};
 
 use defect_agent::policy::{PolicyCtx, PolicyDecision};
 use defect_agent::tool::SafetyClass;
-use defect_config::SandboxMode;
+use defect_config::{ProviderConfigFile, SandboxMode};
 use serde_json::json;
 
 #[test]
@@ -30,4 +30,16 @@ fn open_policy_allows_destructive_tools() {
     let decision = policy.classify(PolicyCtx::new("bash", SafetyClass::Destructive, &args, cwd));
 
     assert!(matches!(decision, PolicyDecision::Allow));
+}
+
+#[test]
+fn litellm_defaults_fill_endpoint_and_credential_env() {
+    let provider = ProviderDefaults {
+        base_url: LITELLM_DEFAULT_BASE_URL,
+        api_key_env: LITELLM_API_KEY_ENV,
+    }
+    .apply(ProviderConfigFile::default());
+
+    assert_eq!(provider.base_url.as_deref(), Some(LITELLM_DEFAULT_BASE_URL));
+    assert_eq!(provider.api_key_env.as_deref(), Some(LITELLM_API_KEY_ENV));
 }

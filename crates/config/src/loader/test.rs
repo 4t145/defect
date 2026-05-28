@@ -8,6 +8,7 @@ use crate::overrides::{merge_toml_values, parse_cli_override};
 use crate::types::{
     CliOverrides, ConfigError, ConfigSource, ConfigWarning, HookCommandSpec, HookHandlerSpec,
     HttpProxyMode, LoadConfigOptions, PROJECT_LOCAL_CONFIG_RELATIVE, ProviderKind,
+    ProviderProtocol, ReasoningEffort,
 };
 use defect_agent::session::WebSearchCapabilityMode;
 use defect_agent::tool::SafetyClass;
@@ -138,6 +139,280 @@ models = ["gpt-4.1-mini", "gpt-4.1", "o4-mini"]
             .as_slice(),
         )
     );
+}
+
+#[test]
+fn multiple_configured_providers_contribute_allowed_models() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "openai"
+
+[providers.openai]
+default_model = "gpt-4o-mini"
+models = ["gpt-4o-mini"]
+
+[providers.litellm]
+default_model = "anthropic/claude-sonnet-4-5"
+models = ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(
+        loaded.effective.turn.allowed_models.as_deref(),
+        Some(
+            [
+                "gpt-4o-mini".to_string(),
+                "anthropic/claude-sonnet-4-5".to_string(),
+                "openai/gpt-4o".to_string(),
+            ]
+            .as_slice(),
+        )
+    );
+}
+
+#[test]
+fn litellm_provider_uses_builtin_section_and_requires_declared_model() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "litellm"
+
+[providers.litellm]
+base_url = "http://localhost:4000/v1"
+default_model = "openai/gpt-4o-mini"
+models = ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4-5"]
+api_key_env = "LITELLM_API_KEY"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(loaded.effective.cli.provider, ProviderKind::Litellm);
+    assert_eq!(loaded.effective.cli.model, "openai/gpt-4o-mini");
+    assert_eq!(
+        loaded.effective.providers.litellm.base_url.as_deref(),
+        Some("http://localhost:4000/v1")
+    );
+    assert_eq!(
+        loaded.effective.providers.litellm.api_key_env.as_deref(),
+        Some("LITELLM_API_KEY")
+    );
+    assert_eq!(
+        loaded.effective.turn.allowed_models.as_deref(),
+        Some(
+            [
+                "openai/gpt-4o-mini".to_string(),
+                "anthropic/claude-sonnet-4-5".to_string(),
+            ]
+            .as_slice(),
+        )
+    );
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn litellm_provider_requires_default_model() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "litellm"
+"#,
+    );
+
+    let err = load_config(test_options(&tmp)).expect_err("invalid config");
+
+    match err {
+        ConfigError::Invalid { message, .. } => {
+            assert!(
+                message.contains("default.model or providers.litellm.default_model is required")
+            );
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn custom_provider_uses_named_section_and_openai_chat_protocol() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "siliconflow"
+
+[providers.siliconflow]
+protocol = "openai-chat"
+base_url = "https://api.siliconflow.cn/v1"
+default_model = "deepseek-ai/DeepSeek-V3"
+models = ["deepseek-ai/DeepSeek-V3"]
+display_name = "SiliconFlow"
+api_key_env = "SILICONFLOW_API_KEY"
+reasoning_effort = "medium"
+
+[providers.siliconflow.headers]
+x-provider-test = "enabled"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    let provider = ProviderKind::Custom("siliconflow".to_string());
+    assert_eq!(loaded.effective.cli.provider, provider);
+    assert_eq!(loaded.effective.cli.model, "deepseek-ai/DeepSeek-V3");
+    let custom = loaded
+        .effective
+        .providers
+        .custom
+        .get("siliconflow")
+        .expect("custom provider");
+    assert_eq!(custom.protocol, Some(ProviderProtocol::OpenaiChat));
+    assert_eq!(
+        custom.base_url.as_deref(),
+        Some("https://api.siliconflow.cn/v1")
+    );
+    assert_eq!(custom.display_name.as_deref(), Some("SiliconFlow"));
+    assert_eq!(custom.api_key_env.as_deref(), Some("SILICONFLOW_API_KEY"));
+    assert_eq!(
+        custom.headers.get("x-provider-test").map(String::as_str),
+        Some("enabled")
+    );
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn custom_provider_parses_aws_section() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "bedrock"
+
+[providers.bedrock]
+protocol = "anthropic-messages"
+default_model = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+[providers.bedrock.aws]
+profile = "work"
+region = "us-west-2"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    let provider = ProviderKind::Custom("bedrock".to_string());
+    assert_eq!(loaded.effective.cli.provider, provider);
+    let custom = loaded
+        .effective
+        .providers
+        .custom
+        .get("bedrock")
+        .expect("bedrock provider");
+    assert_eq!(custom.protocol, Some(ProviderProtocol::AnthropicMessages));
+    let aws = custom.aws.as_ref().expect("aws config");
+    assert_eq!(aws.profile.as_deref(), Some("work"));
+    assert_eq!(aws.region.as_deref(), Some("us-west-2"));
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn custom_provider_requires_matching_section() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "missing"
+"#,
+    );
+
+    let err = load_config(test_options(&tmp)).expect_err("invalid config");
+
+    match err {
+        ConfigError::Invalid { message, .. } => {
+            assert!(message.contains("has no matching [providers.missing] section"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn custom_provider_requires_a_default_model() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[default]
+provider = "localai"
+
+[providers.localai]
+protocol = "openai-chat"
+base_url = "http://localhost:8000/v1"
+"#,
+    );
+
+    let err = load_config(test_options(&tmp)).expect_err("invalid config");
+
+    match err {
+        ConfigError::Invalid { message, .. } => {
+            assert!(
+                message.contains("default.model or providers.localai.default_model is required")
+            );
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn provider_reasoning_effort_parses_per_provider() {
+    let tmp = TempDir::new().expect("tmp");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).expect("git");
+    write(
+        &tmp.path().join("xdg/defect/config.toml"),
+        r#"
+[providers.openai]
+reasoning_effort = "high"
+
+[providers.deepseek]
+reasoning_effort = "xhigh"
+"#,
+    );
+
+    let loaded = load_config(test_options(&tmp)).expect("load config");
+
+    assert_eq!(
+        loaded.effective.providers.openai.reasoning_effort,
+        Some(ReasoningEffort::High)
+    );
+    assert_eq!(
+        loaded.effective.providers.deepseek.reasoning_effort,
+        Some(ReasoningEffort::Xhigh)
+    );
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
 }
 
 #[test]

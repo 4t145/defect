@@ -181,11 +181,8 @@ async fn content_glob_restricts() {
     h.write("a.rs", "TODO rust\n");
     h.write("b.ts", "TODO ts\n");
     let tool = SearchTool::new();
-    let events = drive(tool.execute(
-        json!({"pattern": "TODO", "path_glob": "**/*.rs"}),
-        h.ctx(),
-    ))
-    .await;
+    let events =
+        drive(tool.execute(json!({"pattern": "TODO", "path_glob": "**/*.rs"}), h.ctx())).await;
     let (fields,) = expect_completed(&events);
     let text = extract_text(fields);
     assert!(text.contains("a.rs"), "{text}");

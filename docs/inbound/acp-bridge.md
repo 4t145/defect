@@ -46,7 +46,7 @@ ACP 0.12 的 v2 schema 列出了一大票方法。v0 只实现真正必要的子
 | `initialize`                                            | request      | client → agent     | ✓    | `handlers::initialize`              |
 | `authenticate`                                          | request      | client → agent     | stub | 不开 auth capability，直接 reject   |
 | `session/new`                                           | request      | client → agent     | ✓    | `handlers::session_new`             |
-| `session/load`                                          | request      | client → agent     | P1   | 持久化做完再上                      |
+| `session/load`                                          | request      | client → agent     | ✓    | `handlers::session_load`            |
 | `session/prompt`                                        | request      | client → agent     | ✓    | `handlers::session_prompt`          |
 | `session/cancel`                                        | notification | client → agent     | ✓    | `handlers::session_cancel`          |
 | `session/update`                                        | notification | **agent → client** | ✓    | 由 AgentEvent 流投影                |
@@ -87,7 +87,26 @@ async fn session_new(req: NewSessionRequest) -> Result<NewSessionResponse, Error
 
 `Session` 实例的所有权归 `defect-agent`（见[岔路 2 决议](#关键决议)）。`defect-acp` 持有 `Arc<dyn AgentCore>`，通过 trait 方法访问。
 
-### 2.3 `session/prompt` —— 长 request
+### 2.3 `session/load`
+
+ACP 规范要求 `session/load` 重新加载已有 session 后，先通过 `session/update`
+向客户端 replay 完整 transcript，再响应 `LoadSessionResponse`。这和内部恢复
+LLM history 是两件事：前者用于恢复 editor 面板上的历史 block，后者用于下一轮
+prompt 的模型上下文。
+
+实现边界：
+
+- `defect-agent::Session::history_snapshot()` 暴露只读 `Vec<Message>` 快照。
+- `defect-acp::project::replay_notifications()` 把 `Message` 投影为
+  `UserMessageChunk`、`AgentMessageChunk`、`AgentThoughtChunk`、
+  `ToolCall` 与终态 `ToolCallUpdate`。
+- `session/load` handler 调用 `AgentCore::load_session` 后，发送所有 replay
+  notification，然后才 `respond(LoadSessionResponse)`。
+- 当前 storage 只保存最小可重建 `Message`，因此 replay 工具调用是 coarse
+  transcript：有 tool use 与最终 result，不恢复 live 过程中的 progress /
+  permission UI。
+
+### 2.4 `session/prompt` —— 长 request
 
 ACP 的 `session/prompt` 是 request：**有返回值** `PromptResponse { stop_reason }`。语义上：
 
@@ -130,7 +149,7 @@ async fn session_prompt(
 
 `project` 是[投影表](#3-agentevent--sessionupdate-翻译表)的实现。`handle_permission` 见[§4](#4-请权限的双向流程)。
 
-### 2.4 `session/cancel` —— notification
+### 2.5 `session/cancel` —— notification
 
 ```rust
 async fn session_cancel(req: CancelNotification) {

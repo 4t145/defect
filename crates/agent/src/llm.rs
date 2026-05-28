@@ -9,6 +9,7 @@ pub(crate) mod chunk;
 pub(crate) mod error;
 pub(crate) mod model;
 pub(crate) mod provider;
+pub(crate) mod registry;
 pub(crate) mod request;
 
 pub use capability::{
@@ -20,6 +21,7 @@ pub use error::{
 };
 pub use model::{ModelInfo, ProtocolId, ProviderInfo};
 pub use provider::{LlmProvider, ProviderStream};
+pub use registry::{ModelCandidate, ProviderEntry, ProviderRegistry, ProviderRegistryError};
 pub use request::{
     CompletionRequest, ImageData, Message, MessageContent, ProviderActivityKind, Role,
     SamplingParams, ThinkingConfig, ToolChoice, ToolResultBody,

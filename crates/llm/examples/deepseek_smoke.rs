@@ -83,7 +83,9 @@ async fn main() {
 
     let provider: Arc<dyn LlmProvider> = match DeepSeekProvider::new(DeepSeekConfig {
         api_key: Some(api_key),
+        api_key_env: None,
         base_url,
+        reasoning_effort: None,
         http: defect_http::HttpStackConfig::default(),
     }) {
         Ok(p) => Arc::new(p),

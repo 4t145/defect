@@ -10,12 +10,20 @@ use agent_client_protocol::schema::{
 #[tokio::test]
 async fn stdio_echo_round_trip() {
     let state_root = tempfile::tempdir().expect("state tempdir");
+    let config_root = tempfile::tempdir().expect("config tempdir");
+    let process_cwd = tempfile::tempdir().expect("process cwd tempdir");
     let cwd = tempfile::tempdir().expect("cwd tempdir");
     let prompt_text = "stdio echo smoke";
 
     let binary = PathBuf::from(env!("CARGO_BIN_EXE_defect"));
     let agent = AcpAgent::from_args([
         format!("XDG_STATE_HOME={}", state_root.path().display()),
+        format!("XDG_CONFIG_HOME={}", config_root.path().display()),
+        "sh".to_string(),
+        "-c".to_string(),
+        r#"cd "$1" && shift && exec "$@""#.to_string(),
+        "defect-stdio-smoke".to_string(),
+        process_cwd.path().display().to_string(),
         binary.display().to_string(),
         "--provider".to_string(),
         "echo".to_string(),

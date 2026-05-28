@@ -59,6 +59,10 @@ rmcp = { version = "1", features = ["client"] }
 # toac / toac-build 锁 git rev，等仓库稳定后改 crates.io 版本号
 toac = { version = "0", features = ["sse"] }
 toac-build = { version = "0" }
+aws-config = "1"
+aws-sdk-bedrockruntime = "1"
+aws-smithy-runtime-api = "1"
+aws-smithy-types = "1"
 client-util = "0.3"
 sse-stream = "0.2"
 http = "1"

@@ -230,6 +230,23 @@ models = ["gpt-4o-mini", "gpt-4.1-mini"]
 organization = "org_xxx"
 project = "proj_xxx"
 
+[providers.litellm]
+base_url = "http://localhost:4000/v1"
+default_model = "openai/gpt-4o-mini"
+models = ["openai/gpt-4o-mini", "anthropic/claude-sonnet-4-5"]
+api_key_env = "LITELLM_API_KEY"
+
+[providers.siliconflow]
+protocol = "openai-chat"
+base_url = "https://api.siliconflow.cn/v1"
+default_model = "deepseek-ai/DeepSeek-V3"
+models = ["deepseek-ai/DeepSeek-V3"]
+display_name = "SiliconFlow"
+api_key_env = "SILICONFLOW_API_KEY"
+
+[providers.siliconflow.headers]
+x-provider-test = "enabled"
+
 [tools.bash]
 default_timeout_ms = 30000
 max_timeout_ms = 600000
@@ -290,8 +307,11 @@ x-mcp-test = "enabled"
 说明：
 
 - `default.provider` / `default.model` 是全局默认选择。
+- `default.provider` 可指向内置 provider（`echo` / `anthropic` / `openai` / `deepseek` / `litellm`），也可指向 `[providers.<name>]` 中声明的自定义 provider。
 - `providers.<name>.default_model` 是该 provider 的默认模型；当当前 provider 命中时可作为回退值。
 - `providers.<name>.models` 是该 provider 允许暴露的模型集合。
+- `providers.<name>.protocol` 是协议编解码选择，不是一个独立 instance 概念。P1 自定义 provider 只支持 `openai-chat`；后续 Bedrock 这类 provider 会复用其它 protocol 但单独处理 transport / auth。
+- `providers.<name>.base_url` / `api_key_env` / `headers` 描述 provider 运行时接入点。`api_key_env` 只声明环境变量名，实际凭证仍不进入 TOML。
 - `mcp.servers` 是“可引用的 server 定义表”。
 - `mcp.enabled_servers` 是入口默认启用的 MCP server 名单。
 - `session/new.mcp_servers` 仍然保留，用于会话级追加；若与入口默认配置重名，则会话级配置覆盖默认配置。

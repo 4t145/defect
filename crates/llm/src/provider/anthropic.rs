@@ -40,11 +40,14 @@ type Client = ApiClient<HttpStack>;
 /// Anthropic provider 配置。
 ///
 /// `api_key` / `base_url` 可显式提供，否则从环境变量读取。
-/// `http` 配置 transport 层（超时 / 重试 / 代理 / UA），默认见
-/// [`HttpStackConfig::default`].
+/// `api_key_env` 用来覆盖默认的 `ANTHROPIC_API_KEY` 名——同款 endpoint
+/// 在 secret manager 里换名是常见需求（与 OpenAI 那侧形状一致，详见
+/// `OpenAiConfig::api_key_env`）。`http` 配置 transport 层（超时 / 重试 /
+/// 代理 / UA），默认见 [`HttpStackConfig::default`].
 #[derive(Debug, Default, Clone)]
 pub struct AnthropicConfig {
     pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
     pub base_url: Option<String>,
     pub http: HttpStackConfig,
 }
@@ -53,20 +56,22 @@ impl AnthropicConfig {
     pub fn from_env() -> Self {
         Self {
             api_key: env::var(API_KEY_ENV).ok(),
+            api_key_env: None,
             base_url: env::var(BASE_URL_ENV).ok(),
             http: HttpStackConfig::default(),
         }
     }
 
     fn resolve_api_key(&self) -> Result<String, ProviderError> {
-        self.api_key
-            .clone()
-            .or_else(|| env::var(API_KEY_ENV).ok())
-            .ok_or_else(|| {
-                ProviderError::new(ProviderErrorKind::AuthMissing {
-                    var_hint: Some(API_KEY_ENV.into()),
-                })
+        if let Some(api_key) = self.api_key.clone() {
+            return Ok(api_key);
+        }
+        let env_name = self.api_key_env.as_deref().unwrap_or(API_KEY_ENV);
+        env::var(env_name).map_err(|_| {
+            ProviderError::new(ProviderErrorKind::AuthMissing {
+                var_hint: Some(env_name.into()),
             })
+        })
     }
 
     fn resolve_base_url(&self) -> String {

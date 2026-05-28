@@ -45,6 +45,7 @@ const MSG_STOP: &str = r#"{"type":"message_stop"}"#;
 fn provider_for(server_uri: &str) -> Arc<dyn LlmProvider> {
     let cfg = AnthropicConfig {
         api_key: Some(TEST_API_KEY.to_string()),
+        api_key_env: None,
         base_url: Some(server_uri.to_string()),
         http: defect_http::HttpStackConfig::default(),
     };
