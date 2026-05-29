@@ -12,7 +12,8 @@ use defect_agent::fs::{FsBackend, NoopFsBackend};
 use defect_agent::llm::LlmProvider;
 use defect_agent::policy::{OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
-    AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig, new_session_id,
+    AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig,
+    new_session_id,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{

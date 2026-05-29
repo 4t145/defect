@@ -745,7 +745,7 @@ impl Session for DefaultSession {
                     permissions: self.permissions.as_ref(),
                     cancel,
                     config: &config,
-                    system_prompt,
+                    system_prompt: system_prompt.map(Arc::from),
                     cwd: &self.cwd,
                     fs: self.fs.clone(),
                     shell: self.shell.clone(),

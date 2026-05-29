@@ -295,7 +295,7 @@ fn encode_user_message_into(m: &Message, out: &mut Vec<wire::ChatCompletionReque
     let mut user_parts: Vec<wire::ChatCompletionRequestUserMessageContentPart> = Vec::new();
     let mut tool_results: Vec<(String, String)> = Vec::new(); // (tool_use_id, text)
 
-    for c in &m.content {
+    for c in m.content.iter() {
         match c {
             MessageContent::Text { text } => {
                 user_parts.push(
@@ -387,7 +387,7 @@ fn encode_assistant_message_into(
     let mut tool_calls: Vec<wire::ChatCompletionMessageToolCallsItem> = Vec::new();
     let mut reasoning_text = String::new();
 
-    for c in &m.content {
+    for c in m.content.iter() {
         match c {
             MessageContent::Text { text } => text_parts.push(text.clone()),
             MessageContent::Thinking { text, .. } => {

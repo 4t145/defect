@@ -450,7 +450,10 @@ fn command_env_vars(event: &HookEvent<'_>, ctx: &HookCtx<'_>) -> BTreeMap<String
         "DEFECT_HOOK_EVENT".to_string(),
         event.kind_str().to_string(),
     );
-    out.insert("DEFECT_SESSION_ID".to_string(), ctx.session_id.0.to_string());
+    out.insert(
+        "DEFECT_SESSION_ID".to_string(),
+        ctx.session_id.0.to_string(),
+    );
     out.insert(
         "DEFECT_CWD".to_string(),
         ctx.cwd.to_string_lossy().into_owned(),
@@ -468,9 +471,7 @@ fn command_env_vars(event: &HookEvent<'_>, ctx: &HookCtx<'_>) -> BTreeMap<String
                 serde_json::to_string(fields).unwrap_or_default(),
             );
         }
-        HookEvent::PostToolUseFailure {
-            name, error, ..
-        } => {
+        HookEvent::PostToolUseFailure { name, error, .. } => {
             out.insert("DEFECT_TOOL_NAME".to_string(), (*name).to_string());
             out.insert("DEFECT_TOOL_ERROR".to_string(), (*error).to_string());
         }
@@ -494,10 +495,7 @@ fn command_env_vars(event: &HookEvent<'_>, ctx: &HookCtx<'_>) -> BTreeMap<String
 // helpers
 // ---------------------------------------------------------------------------
 
-fn io_invalid(
-    msg: impl Into<String>,
-    detail: impl std::fmt::Display,
-) -> std::io::Error {
+fn io_invalid(msg: impl Into<String>, detail: impl std::fmt::Display) -> std::io::Error {
     let s = msg.into();
     let body = if s.is_empty() {
         detail.to_string()
@@ -559,7 +557,11 @@ mod test {
         if !Path::new("/bin/sh").exists() {
             return;
         }
-        let h = CommandHandler::new(argv_spec(vec!["/bin/sh", "-c", "echo '{\"block\":\"nope\"}'"]));
+        let h = CommandHandler::new(argv_spec(vec![
+            "/bin/sh",
+            "-c",
+            "echo '{\"block\":\"nope\"}'",
+        ]));
         let session_id = SessionId::new("s1");
         let cwd = Path::new("/");
         let id = ToolCallId::new("c1");

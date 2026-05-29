@@ -59,10 +59,9 @@ async fn main() -> anyhow::Result<()> {
         "starting defect ACP server on stdio"
     );
 
-    let http_client = defect_http::build_fetch_client_arc(&build_http_stack_config(
-        &config.effective.http,
-    )?)
-    .map_err(|e| anyhow::anyhow!("fetch http client init failed: {e}"))?;
+    let http_client =
+        defect_http::build_fetch_client_arc(&build_http_stack_config(&config.effective.http)?)
+            .map_err(|e| anyhow::anyhow!("fetch http client init failed: {e}"))?;
 
     let tools = build_process_tools(&config);
     let storage = Arc::new(StorageObserver::new(default_sessions_root()?));

@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::error::BoxError;
-use crate::event::{AgentEvent, PermissionResolution};
+use crate::event::{AgentEvent, LlmRequestSnapshot, PermissionResolution};
 use crate::fs::FsBackend;
 use crate::hooks::{HookCtx, HookEngine, HookEvent, HookPatch};
 use crate::http::HttpClient;
@@ -159,7 +159,9 @@ pub struct TurnRunner<'a> {
     pub permissions: &'a PermissionGate,
     pub cancel: CancellationToken,
     pub config: &'a TurnConfig,
-    pub system_prompt: Option<String>,
+    /// 本 turn 解析定型的 system prompt。`Arc<str>`：每次 `build_request` 都
+    /// `clone` 进 `CompletionRequest.system`，Arc 让其退化成引用计数。
+    pub system_prompt: Option<Arc<str>>,
     pub cwd: &'a std::path::Path,
     pub fs: Arc<dyn FsBackend>,
     pub shell: Arc<dyn ShellBackend>,
@@ -371,6 +373,12 @@ impl<'a> TurnRunner<'a> {
             .emit(AgentEvent::LlmCallStarted {
                 model: req.model.clone(),
                 attempt,
+                // Arc 包裹：fan-out 给多个订阅者时 clone 退化成引用计数，
+                // 避免长上下文下整份 messages 历史被反复深拷贝。
+                request: Arc::new(LlmRequestSnapshot {
+                    system: req.system.clone(),
+                    messages: req.messages.clone(),
+                }),
             })
             .await;
 
@@ -1192,7 +1200,7 @@ fn assistant_message(outcome: &DrainOutcome) -> Message {
     }
     Message {
         role: Role::Assistant,
-        content,
+        content: content.into(),
     }
 }
 

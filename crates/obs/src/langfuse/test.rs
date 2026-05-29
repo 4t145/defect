@@ -6,11 +6,13 @@
 use agent_client_protocol::schema::{
     ContentBlock, StopReason, TextContent, ToolCallId, ToolCallStatus, ToolCallUpdateFields,
 };
-use defect_agent::event::AgentEvent;
-use defect_agent::llm::Usage;
+use defect_agent::event::{AgentEvent, LlmRequestSnapshot};
+use defect_agent::llm::{Message, MessageContent, Role, Usage};
 use serde_json::json;
 
-use super::model::{EventKind, IngestionEvent, ObservationBody, ObservationLevel, TraceBody};
+use super::model::{
+    EventKind, IngestionEvent, IngestionResponse, ObservationBody, ObservationLevel, TraceBody,
+};
 use super::projector::TraceProjector;
 
 /// 确定性 id 生成器：`env-1`、`env-2`…，便于断言。
@@ -26,6 +28,19 @@ const NOW: &str = "2026-05-29T00:00:00Z";
 
 fn text_block(s: &str) -> ContentBlock {
     ContentBlock::Text(TextContent::new(s.to_string()))
+}
+
+/// 一个最小请求快照：system + 一条 user 文本消息。
+fn snapshot(system: Option<&str>, user: &str) -> std::sync::Arc<LlmRequestSnapshot> {
+    std::sync::Arc::new(LlmRequestSnapshot {
+        system: system.map(std::sync::Arc::from),
+        messages: vec![Message {
+            role: Role::User,
+            content: std::sync::Arc::from([MessageContent::Text {
+                text: user.to_string(),
+            }]),
+        }],
+    })
 }
 
 #[test]
@@ -117,6 +132,29 @@ fn span_with_parent_observation() {
     assert!(v["body"].get("usageDetails").is_none());
 }
 
+// ---- ingestion response 解析（207 误报修复回归） ----
+
+#[test]
+fn parses_207_all_success_as_no_errors() {
+    // 这是真实 207 响应体（全部成功）——errors 为空，不应被当作错误。
+    let body =
+        r#"{"successes":[{"id":"be5dbe21-a204-407b-bf52-6ec031164650","status":201}],"errors":[]}"#;
+    let parsed: IngestionResponse = serde_json::from_str(body).unwrap();
+    assert_eq!(parsed.successes.len(), 1);
+    assert_eq!(parsed.successes[0].status, 201);
+    assert!(parsed.errors.is_empty(), "全成功的 207 不应有 errors");
+}
+
+#[test]
+fn parses_207_with_partial_errors() {
+    let body = r#"{"successes":[{"id":"a","status":201}],"errors":[{"id":"b","status":400,"message":"bad body"}]}"#;
+    let parsed: IngestionResponse = serde_json::from_str(body).unwrap();
+    assert_eq!(parsed.successes.len(), 1);
+    assert_eq!(parsed.errors.len(), 1);
+    assert_eq!(parsed.errors[0].status, 400);
+    assert_eq!(parsed.errors[0].message.as_deref(), Some("bad body"));
+}
+
 // ---- projector ----
 
 /// 把 projector 产出的 ingestion 事件序列化成 `Vec<Value>`，便于断言。
@@ -151,23 +189,49 @@ fn llm_call_lifecycle_creates_then_updates_generation() {
     let mut ids = counter_ids();
     project_json(&mut proj, AgentEvent::TurnStarted, &mut ids); // trace_id = id-1
 
+    // generation-create 带 input（system + messages）。
     let created = project_json(
         &mut proj,
         AgentEvent::LlmCallStarted {
             model: "claude-opus-4-8".into(),
             attempt: 1,
+            request: snapshot(Some("you are helpful"), "hi there"),
         },
         &mut ids,
     );
     assert_eq!(created[0]["type"], "generation-create");
     let gen_id = created[0]["body"]["id"].as_str().unwrap().to_string();
-    // generation id 派生自 trace_id：{trace}-gen-1
     assert_eq!(gen_id, "id-1-gen-1");
     assert_eq!(created[0]["body"]["traceId"], "id-1");
     assert_eq!(created[0]["body"]["model"], "claude-opus-4-8");
     assert_eq!(created[0]["body"]["metadata"]["attempt"], 1);
+    // input 是 chat messages 数组：system 第一条，user 第二条。
+    assert_eq!(created[0]["body"]["input"][0]["role"], "system");
+    assert_eq!(created[0]["body"]["input"][0]["content"], "you are helpful");
+    assert_eq!(created[0]["body"]["input"][1]["role"], "user");
+    assert_eq!(created[0]["body"]["input"][1]["content"], "hi there");
 
-    // 助手输出累积。
+    // 真实顺序：LlmCallFinished 先到（usage 此时为空），output/thinking 之后才流式来。
+    let after_finished = project_json(
+        &mut proj,
+        AgentEvent::LlmCallFinished {
+            model: "claude-opus-4-8".into(),
+            attempt: 1,
+            usage: Usage::default(),
+            error: None,
+        },
+        &mut ids,
+    );
+    // Finished 本身不产出 ingestion 事件（generation 收尾被延迟）。
+    assert!(after_finished.is_empty());
+
+    project_json(
+        &mut proj,
+        AgentEvent::AssistantThought {
+            content: text_block("let me think"),
+        },
+        &mut ids,
+    );
     project_json(
         &mut proj,
         AgentEvent::AssistantText {
@@ -183,36 +247,29 @@ fn llm_call_lifecycle_creates_then_updates_generation() {
         &mut ids,
     );
 
-    let finished = project_json(
+    // generation-update 在 TurnEnded 时才 flush，且先于 trace 更新。
+    let ended = project_json(
         &mut proj,
-        AgentEvent::LlmCallFinished {
-            model: "claude-opus-4-8".into(),
-            attempt: 1,
+        AgentEvent::TurnEnded {
+            reason: StopReason::EndTurn,
             usage: Usage {
                 input_tokens: Some(100),
                 output_tokens: Some(20),
-                cache_read_input_tokens: Some(8),
-                cache_creation_input_tokens: None,
+                ..Default::default()
             },
-            error: None,
         },
         &mut ids,
     );
-    assert_eq!(finished[0]["type"], "generation-update");
-    // 同一 generation id（合并 endTime/output/usage）。
-    assert_eq!(finished[0]["body"]["id"], gen_id);
-    assert_eq!(finished[0]["body"]["output"], "hello world");
-    assert_eq!(finished[0]["body"]["usageDetails"]["input"], 100);
-    assert_eq!(finished[0]["body"]["usageDetails"]["output"], 20);
-    assert_eq!(finished[0]["body"]["usageDetails"]["cache_read_input_tokens"], 8);
-    // None 的 cache_creation 不上报。
-    assert!(
-        finished[0]["body"]["usageDetails"]
-            .get("cache_creation_input_tokens")
-            .is_none()
-    );
-    // 无 error → 无 level。
-    assert!(finished[0]["body"].get("level").is_none());
+    assert_eq!(ended[0]["type"], "generation-update");
+    assert_eq!(ended[0]["body"]["id"], gen_id);
+    assert_eq!(ended[0]["body"]["output"], "hello world");
+    // thinking 放 metadata.reasoning，不进 output。
+    assert_eq!(ended[0]["body"]["metadata"]["reasoning"], "let me think");
+    assert!(ended[0]["body"].get("level").is_none());
+    // 第二个事件是 trace 收尾（usage 在 turn 级）。
+    assert_eq!(ended[1]["type"], "trace-create");
+    assert_eq!(ended[1]["body"]["output"], "hello world");
+    assert_eq!(ended[1]["body"]["metadata"]["usage"]["input"], 100);
 }
 
 #[test]
@@ -225,10 +282,12 @@ fn llm_error_sets_error_level_and_status() {
         AgentEvent::LlmCallStarted {
             model: "m".into(),
             attempt: 2,
+            request: snapshot(None, "go"),
         },
         &mut ids,
     );
-    let finished = project_json(
+    // error 记在 generation 上，收尾时（TurnEnded）写出 level/statusMessage。
+    project_json(
         &mut proj,
         AgentEvent::LlmCallFinished {
             model: "m".into(),
@@ -238,10 +297,18 @@ fn llm_error_sets_error_level_and_status() {
         },
         &mut ids,
     );
-    assert_eq!(finished[0]["body"]["level"], "ERROR");
-    assert_eq!(finished[0]["body"]["statusMessage"], "rate limited");
-    // usage 全 None → 不带 usageDetails。
-    assert!(finished[0]["body"].get("usageDetails").is_none());
+    let ended = project_json(
+        &mut proj,
+        AgentEvent::TurnEnded {
+            reason: StopReason::EndTurn,
+            usage: Usage::default(),
+        },
+        &mut ids,
+    );
+    // 第一个事件是 generation-update（带 error）。
+    assert_eq!(ended[0]["type"], "generation-update");
+    assert_eq!(ended[0]["body"]["level"], "ERROR");
+    assert_eq!(ended[0]["body"]["statusMessage"], "rate limited");
 }
 
 #[test]
@@ -316,21 +383,29 @@ fn failed_tool_sets_error_level() {
 fn turn_ended_updates_trace_with_same_id() {
     let mut proj = TraceProjector::new("sess-x");
     let mut ids = counter_ids();
-    let started = project_json(&mut proj, AgentEvent::TurnStarted, &mut ids);
-    let trace_id = started[0]["body"]["id"].as_str().unwrap().to_string();
 
-    project_json(
+    // 真实顺序：主循环先发 UserPromptCommitted，再发 TurnStarted。
+    let pre = project_json(
         &mut proj,
         AgentEvent::UserPromptCommitted {
             content: vec![text_block("do something")],
         },
         &mut ids,
     );
+    // UserPromptCommitted 本身不产出 ingestion 事件（只暂存 input）。
+    assert!(pre.is_empty());
+
+    let started = project_json(&mut proj, AgentEvent::TurnStarted, &mut ids);
+    let trace_id = started[0]["body"]["id"].as_str().unwrap().to_string();
+    // input 在 trace-create 时就带上（不必等 TurnEnded）——这是本次回归点。
+    assert_eq!(started[0]["body"]["input"], "do something");
+
     project_json(
         &mut proj,
         AgentEvent::LlmCallStarted {
             model: "m".into(),
             attempt: 1,
+            request: snapshot(None, "go"),
         },
         &mut ids,
     );
@@ -354,13 +429,16 @@ fn turn_ended_updates_trace_with_same_id() {
         },
         &mut ids,
     );
-    // 用同一 trace_id 更新（合并 input/output/endTime）。
-    assert_eq!(ended[0]["body"]["id"], trace_id);
-    assert_eq!(ended[0]["body"]["sessionId"], "sess-x");
-    assert_eq!(ended[0]["body"]["input"], "do something");
-    assert_eq!(ended[0]["body"]["output"], "done");
-    assert_eq!(ended[0]["body"]["metadata"]["stop_reason"], "end_turn");
-    assert_eq!(ended[0]["body"]["metadata"]["usage"]["input"], 100);
+    // TurnEnded 先 flush generation-update（[0]），再发 trace 更新（[1]）。
+    assert_eq!(ended[0]["type"], "generation-update");
+    assert_eq!(ended[1]["type"], "trace-create");
+    // trace 用同一 trace_id 更新（合并 input/output/endTime）。
+    assert_eq!(ended[1]["body"]["id"], trace_id);
+    assert_eq!(ended[1]["body"]["sessionId"], "sess-x");
+    assert_eq!(ended[1]["body"]["input"], "do something");
+    assert_eq!(ended[1]["body"]["output"], "done");
+    assert_eq!(ended[1]["body"]["metadata"]["stop_reason"], "end_turn");
+    assert_eq!(ended[1]["body"]["metadata"]["usage"]["input"], 100);
 }
 
 #[test]
@@ -390,6 +468,7 @@ fn events_before_turn_started_are_ignored() {
         AgentEvent::LlmCallStarted {
             model: "m".into(),
             attempt: 1,
+            request: snapshot(None, "go"),
         },
         &mut ids,
     );

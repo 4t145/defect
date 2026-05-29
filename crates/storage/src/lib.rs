@@ -623,7 +623,7 @@ impl RecordProjector {
         Some(SessionRecord::Message {
             message: Message {
                 role: Role::User,
-                content: std::mem::take(&mut self.pending_tool_results),
+                content: std::mem::take(&mut self.pending_tool_results).into(),
             },
         })
     }
@@ -654,7 +654,7 @@ impl AssistantReplay {
         }
         Some(Message {
             role: Role::Assistant,
-            content,
+            content: content.into(),
         })
     }
 }

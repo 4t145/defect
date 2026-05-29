@@ -8,10 +8,10 @@
 use std::time::Duration;
 
 use defect_config::LangfuseConfig;
+use defect_obs::LangfuseObserver;
 use defect_obs::langfuse::{
     DEFAULT_FLUSH_INTERVAL, DEFAULT_HOST, DEFAULT_MAX_BATCH, LangfuseSetup, build_observer,
 };
-use defect_obs::LangfuseObserver;
 
 /// 按 typed Langfuse 配置构造上报观察器。
 ///

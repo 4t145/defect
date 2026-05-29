@@ -238,7 +238,7 @@ async fn missing_api_key_header_is_rejected_by_server() {
         system: None,
         messages: vec![defect_agent::llm::Message {
             role: defect_agent::llm::Role::User,
-            content: vec![defect_agent::llm::MessageContent::Text { text: "hi".into() }],
+            content: vec![defect_agent::llm::MessageContent::Text { text: "hi".into() }].into(),
         }],
         tools: vec![],
         tool_choice: defect_agent::llm::ToolChoice::Auto,

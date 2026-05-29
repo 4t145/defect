@@ -6,9 +6,9 @@ use tempfile::TempDir;
 use crate::loader::{dotenv_updates_from_str, load_config};
 use crate::overrides::{merge_toml_values, parse_cli_override};
 use crate::types::{
-    CliOverrides, ConfigError, ConfigSource, HookCommandSpec, HookHandlerSpec,
-    HttpProxyMode, LoadConfigOptions, PROJECT_LOCAL_CONFIG_RELATIVE, ProviderKind,
-    ProviderProtocol, ReasoningEffort,
+    CliOverrides, ConfigError, ConfigSource, HookCommandSpec, HookHandlerSpec, HttpProxyMode,
+    LoadConfigOptions, PROJECT_LOCAL_CONFIG_RELATIVE, ProviderKind, ProviderProtocol,
+    ReasoningEffort,
 };
 use defect_agent::session::WebSearchCapabilityMode;
 use defect_agent::tool::SafetyClass;

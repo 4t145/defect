@@ -11,7 +11,7 @@ use crate::tool::ToolSchema;
 fn snapshot_counts_thinking_tool_use_and_tool_result_blocks() {
     let req = CompletionRequest {
         model: "deepseek-v4-flash".to_string(),
-        system: Some("system".to_string()),
+        system: Some("system".into()),
         messages: vec![
             Message {
                 role: Role::Assistant,
@@ -28,7 +28,8 @@ fn snapshot_counts_thinking_tool_use_and_tool_result_blocks() {
                         name: "read_file".to_string(),
                         args: json!({"path": "Cargo.toml"}),
                     },
-                ],
+                ]
+                .into(),
             },
             Message {
                 role: Role::User,
@@ -38,7 +39,8 @@ fn snapshot_counts_thinking_tool_use_and_tool_result_blocks() {
                         text: "ok".to_string(),
                     },
                     is_error: false,
-                }],
+                }]
+                .into(),
             },
         ],
         tools: vec![ToolSchema {
@@ -85,12 +87,13 @@ fn delta_reports_none_when_snapshot_is_identical() {
 fn request_with_text(text: &str) -> CompletionRequest {
     CompletionRequest {
         model: "gpt-4.1-nano".to_string(),
-        system: Some("system".to_string()),
+        system: Some("system".into()),
         messages: vec![Message {
             role: Role::User,
             content: vec![MessageContent::Text {
                 text: text.to_string(),
-            }],
+            }]
+            .into(),
         }],
         tools: vec![ToolSchema {
             name: "read_file".to_string(),

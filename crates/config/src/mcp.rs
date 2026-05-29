@@ -151,4 +151,3 @@ const fn transport_name(transport: McpTransportKind) -> &'static str {
         McpTransportKind::Sse => "sse",
     }
 }
-

@@ -44,6 +44,7 @@
 | outbound | LLM provider 集测（wiremock 离线 e2e，两家）                   | `docs/outbound/llm-anthropic.md` §10 / `docs/outbound/llm-openai.md` §9 | P1     | ✅ 已完成 |
 | outbound | HTTP 客户端基础设施（超时/重试/代理/UA）                       | `docs/outbound/http.md`                                                 | P1     | ✅ 已完成 |
 | outbound | tracing 接入（结构化日志 + EnvFilter）                         | `docs/outbound/tracing.md`                                              | P0     | ✅ 已完成 |
+| outbound | 可观测性独立成 `defect-obs` + Langfuse 上报（SessionObserver→AgentEvent→ingestion） | `docs/internal/observability-langfuse.md` | P1 | ✅ 已完成 |
 | outbound | MCP client（stdio + sse 传输）                                 | `docs/outbound/mcp-client.md`                                           | P1     | ✅ 已完成 |
 | outbound | MCP 工具适配层（包装为内部 Tool trait）                        | `docs/outbound/mcp-adapter.md`                                          | P1     | ✅ 已完成 |
 | inbound  | ACP 桥接层总体设计（薄壳形态、方法分发、AgentEvent 投影）      | `docs/inbound/acp-bridge.md`                                            | P0     | ✅ 已完成 |
@@ -67,7 +68,8 @@
 | 域       | 功能点                                                         | 文档                          | 完成情况 |
 | -------- | -------------------------------------------------------------- | ----------------------------- | -------- |
 | outbound | LLM provider 真端点 smoke（examples/，手动跑）                 | —                             | ✅ 已完成 |
-| outbound | tracing OTLP exporter（导出到外部 collector）                  | `docs/outbound/tracing-otlp.md` | 🕒 未开始 |
+| outbound | tracing OTLP exporter（导出到外部 collector；走 tracing-opentelemetry Layer，权衡见 langfuse 文档 §8） | `docs/internal/observability-langfuse.md` §8 | 🕒 未开始 |
+| outbound | ObsContext 透传：工具内 embedding/后端调用挂回 langfuse trace | `docs/internal/observability-langfuse.md` §5 | 🕒 未开始 |
 | inbound  | ACP Content 音频输入支持                                       | `docs/inbound/acp-prompt.md`  | 🕒 未开始 |
 | inbound  | ACP Content 二进制资源支持（BlobResourceContents）              | `docs/inbound/acp-prompt.md`  | 🕒 未开始 |
 | internal | Skill 加载机制（glob 条件匹配 + always 的 markdown skill 注入到 system prompt，附 `skill` 工具供模型按需加载） | `docs/internal/skills.md` | 🕒 未开始 |

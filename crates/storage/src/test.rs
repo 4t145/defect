@@ -54,7 +54,8 @@ fn append_record_then_replay_preserves_order() {
                 role: Role::User,
                 content: vec![MessageContent::Text {
                     text: "hello".to_string(),
-                }],
+                }]
+                .into(),
             },
         },
     );
@@ -65,7 +66,8 @@ fn append_record_then_replay_preserves_order() {
                 role: Role::Assistant,
                 content: vec![MessageContent::Text {
                     text: "world".to_string(),
-                }],
+                }]
+                .into(),
             },
         },
     );
@@ -158,7 +160,8 @@ fn write_then_load_snapshot_roundtrips() {
                 role: Role::User,
                 content: vec![MessageContent::Text {
                     text: "compacted".to_string(),
-                }],
+                }]
+                .into(),
             }],
             turn_count: 1,
             last_turn_ended: true,
@@ -194,7 +197,8 @@ fn replay_state_uses_snapshot_and_journal_tail() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "old user".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -212,7 +216,8 @@ fn replay_state_uses_snapshot_and_journal_tail() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "snapshot user".to_string(),
-                    }],
+                    }]
+                    .into(),
                 }],
                 turn_count: 1,
                 last_turn_ended: false,
@@ -228,7 +233,8 @@ fn replay_state_uses_snapshot_and_journal_tail() {
                     role: Role::Assistant,
                     content: vec![MessageContent::Text {
                         text: "tail assistant".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ))
@@ -254,13 +260,15 @@ fn replay_state_uses_snapshot_and_journal_tail() {
                 role: Role::User,
                 content: vec![MessageContent::Text {
                     text: "snapshot user".to_string(),
-                }],
+                }]
+                .into(),
             },
             Message {
                 role: Role::Assistant,
                 content: vec![MessageContent::Text {
                     text: "tail assistant".to_string(),
-                }],
+                }]
+                .into(),
             },
         ]
     );
@@ -297,7 +305,8 @@ fn snapshot_tail_rejects_sequence_gap() {
                     role: Role::Assistant,
                     content: vec![MessageContent::Text {
                         text: "gap".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ))
@@ -337,7 +346,8 @@ fn next_record_seq_continues_after_snapshot_tail() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "before".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ))
@@ -350,7 +360,8 @@ fn next_record_seq_continues_after_snapshot_tail() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "before".to_string(),
-                    }],
+                    }]
+                    .into(),
                 }],
                 turn_count: 0,
                 last_turn_ended: true,
@@ -365,7 +376,8 @@ fn next_record_seq_continues_after_snapshot_tail() {
                     role: Role::Assistant,
                     content: vec![MessageContent::Text {
                         text: "after".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ))
@@ -423,7 +435,8 @@ fn compact_journal_to_snapshot_removes_covered_prefix() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "hello".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -435,7 +448,8 @@ fn compact_journal_to_snapshot_removes_covered_prefix() {
                     role: Role::Assistant,
                     content: vec![MessageContent::Text {
                         text: "world".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -489,7 +503,8 @@ fn replay_state_rebuilds_user_and_assistant_history() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "hello".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -501,7 +516,8 @@ fn replay_state_rebuilds_user_and_assistant_history() {
                     role: Role::Assistant,
                     content: vec![MessageContent::Text {
                         text: "world".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -525,16 +541,16 @@ fn replay_state_rebuilds_user_and_assistant_history() {
     assert_eq!(replay.history[0].role, Role::User);
     assert_eq!(
         replay.history[0].content,
-        vec![MessageContent::Text {
+        Into::<std::sync::Arc<[_]>>::into(vec![MessageContent::Text {
             text: "hello".to_string()
-        }]
+        }])
     );
     assert_eq!(replay.history[1].role, Role::Assistant);
     assert_eq!(
         replay.history[1].content,
-        vec![MessageContent::Text {
+        Into::<std::sync::Arc<[_]>>::into(vec![MessageContent::Text {
             text: "world".to_string()
-        }]
+        }])
     );
 }
 
@@ -559,7 +575,8 @@ fn replay_state_rebuilds_tool_use_and_tool_result_history() {
                     role: Role::User,
                     content: vec![MessageContent::Text {
                         text: "hello".to_string(),
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -578,7 +595,8 @@ fn replay_state_rebuilds_tool_use_and_tool_result_history() {
                             name: "echo".to_string(),
                             args: json!({ "msg": "hi" }),
                         },
-                    ],
+                    ]
+                    .into(),
                 },
             },
         ),
@@ -593,7 +611,8 @@ fn replay_state_rebuilds_tool_use_and_tool_result_history() {
                             text: "hi".to_string(),
                         },
                         is_error: false,
-                    }],
+                    }]
+                    .into(),
                 },
             },
         ),
@@ -617,7 +636,7 @@ fn replay_state_rebuilds_tool_use_and_tool_result_history() {
     assert_eq!(replay.history[2].role, Role::User);
     assert_eq!(
         replay.history[1].content,
-        vec![
+        Into::<std::sync::Arc<[_]>>::into(vec![
             MessageContent::Text {
                 text: "calling tool".to_string(),
             },
@@ -626,17 +645,17 @@ fn replay_state_rebuilds_tool_use_and_tool_result_history() {
                 name: "echo".to_string(),
                 args: json!({ "msg": "hi" }),
             },
-        ]
+        ])
     );
     assert_eq!(
         replay.history[2].content,
-        vec![MessageContent::ToolResult {
+        Into::<std::sync::Arc<[_]>>::into(vec![MessageContent::ToolResult {
             tool_use_id: "call-1".to_string(),
             output: ToolResultBody::Text {
                 text: "hi".to_string(),
             },
             is_error: false,
-        }]
+        }])
     );
 }
 
@@ -697,7 +716,7 @@ fn projector_rebuilds_tool_loop_as_messages() {
     assert_eq!(assistant_call.role, Role::Assistant);
     assert_eq!(
         assistant_call.content,
-        vec![
+        Into::<std::sync::Arc<[_]>>::into(vec![
             MessageContent::Text {
                 text: "calling tool".to_string(),
             },
@@ -706,7 +725,7 @@ fn projector_rebuilds_tool_loop_as_messages() {
                 name: "echo".to_string(),
                 args: json!({ "msg": "hi" }),
             },
-        ]
+        ])
     );
 
     let SessionRecord::Message {
@@ -730,9 +749,9 @@ fn projector_rebuilds_tool_loop_as_messages() {
     assert_eq!(assistant_done.role, Role::Assistant);
     assert_eq!(
         assistant_done.content,
-        vec![MessageContent::Text {
+        Into::<std::sync::Arc<[_]>>::into(vec![MessageContent::Text {
             text: "done".to_string(),
-        }]
+        }])
     );
     assert!(matches!(
         records.next(),
@@ -752,6 +771,7 @@ fn projector_ignores_non_replay_events() {
         AgentEvent::LlmCallStarted {
             model: "m".to_string(),
             attempt: 1,
+            request: Default::default(),
         },
         AgentEvent::LlmCallFinished {
             model: "m".to_string(),

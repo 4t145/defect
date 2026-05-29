@@ -117,7 +117,7 @@ fn replay_user_message(
     message: &Message,
     notifications: &mut Vec<SessionNotification>,
 ) {
-    for content in &message.content {
+    for content in message.content.iter() {
         match content {
             MessageContent::Text { text } => notifications.push(notification(
                 session_id,
@@ -145,7 +145,7 @@ fn replay_assistant_message(
     message: &Message,
     notifications: &mut Vec<SessionNotification>,
 ) {
-    for content in &message.content {
+    for content in message.content.iter() {
         match content {
             MessageContent::Thinking { text, .. } => notifications.push(notification(
                 session_id,

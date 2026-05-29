@@ -88,7 +88,7 @@ fn encode_minimal_request_promotes_system_to_messages0() {
         system: Some("you are helpful".into()),
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "hi".into() }],
+            content: vec![MessageContent::Text { text: "hi".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -152,7 +152,7 @@ fn encode_request_carries_sampling_and_thinking() {
         system: None,
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "x".into() }],
+            content: vec![MessageContent::Text { text: "x".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Required,
@@ -209,7 +209,7 @@ fn encode_request_full_overrides_reasoning_effort_regardless_of_thinking() {
         system: None,
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "x".into() }],
+            content: vec![MessageContent::Text { text: "x".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -244,7 +244,7 @@ fn encode_deepseek_dialect_uses_legacy_max_tokens_without_prompt_cache_key() {
         system: Some("you are helpful".into()),
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "x".into() }],
+            content: vec![MessageContent::Text { text: "x".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -274,7 +274,8 @@ fn encode_deepseek_dialect_writes_empty_reasoning_content_on_assistant_messages(
             role: Role::Assistant,
             content: vec![MessageContent::Text {
                 text: "answer".into(),
-            }],
+            }]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -301,7 +302,8 @@ fn encode_request_sets_stable_prompt_cache_key_from_prefix_shape() {
             role: Role::User,
             content: vec![MessageContent::Text {
                 text: "turn-specific text".into(),
-            }],
+            }]
+            .into(),
         }],
         tools: vec![ToolSchema {
             name: "read_file".into(),
@@ -322,7 +324,8 @@ fn encode_request_sets_stable_prompt_cache_key_from_prefix_shape() {
         role: Role::User,
         content: vec![MessageContent::Text {
             text: "different turn text".into(),
-        }],
+        }]
+        .into(),
     }];
     let second = encode_request(&req_with_new_turn_text).prompt_cache_key;
 
@@ -370,7 +373,8 @@ fn encode_request_splits_tool_use_and_tool_result_into_separate_messages() {
                         name: "fs_read".into(),
                         args: json!({"path": "/tmp/a"}),
                     },
-                ],
+                ]
+                .into(),
             },
             Message {
                 role: Role::User,
@@ -385,7 +389,8 @@ fn encode_request_splits_tool_use_and_tool_result_into_separate_messages() {
                         },
                         is_error: false,
                     },
-                ],
+                ]
+                .into(),
             },
         ],
         tools: vec![ToolSchema {
@@ -499,7 +504,8 @@ fn encode_request_keeps_prompt_cache_key_stable_across_tool_result_followups() {
                         name: "fs_read".into(),
                         args: json!({"path": "/tmp/a"}),
                     },
-                ],
+                ]
+                .into(),
             },
             Message {
                 role: Role::User,
@@ -514,7 +520,8 @@ fn encode_request_keeps_prompt_cache_key_stable_across_tool_result_followups() {
                         },
                         is_error: false,
                     },
-                ],
+                ]
+                .into(),
             },
         ],
         tools: vec![ToolSchema {
@@ -547,7 +554,8 @@ fn encode_request_keeps_prompt_cache_key_stable_across_tool_result_followups() {
                 },
                 is_error: true,
             },
-        ],
+        ]
+        .into(),
     };
 
     let second = encode_request(&changed);
@@ -606,7 +614,8 @@ fn encode_request_image_base64_and_url() {
                         url: "https://example.com/x.jpg".into(),
                     },
                 },
-            ],
+            ]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -656,7 +665,8 @@ fn encode_with_thinking(
                 MessageContent::Text {
                     text: "answer".into(),
                 },
-            ],
+            ]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -715,7 +725,8 @@ fn encode_thinking_concatenates_multiple_thinking_blocks() {
                     signature: None,
                 },
                 MessageContent::Text { text: "ok".into() },
-            ],
+            ]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -741,7 +752,8 @@ fn encode_thinking_only_required_adds_empty_content() {
             content: vec![MessageContent::Thinking {
                 text: "step 1".into(),
                 signature: None,
-            }],
+            }]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -775,7 +787,8 @@ fn encode_thinking_only_forbidden_keeps_content_none() {
             content: vec![MessageContent::Thinking {
                 text: "step 1".into(),
                 signature: None,
-            }],
+            }]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -808,7 +821,8 @@ fn encode_request_default_forbids_thinking_echo() {
                     signature: None,
                 },
                 MessageContent::Text { text: "ok".into() },
-            ],
+            ]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,

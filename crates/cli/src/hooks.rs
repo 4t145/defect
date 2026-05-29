@@ -62,7 +62,10 @@ pub fn build_hook_engine(
         (HookEventKind::UserPromptSubmit, &hooks.user_prompt_submit),
         (HookEventKind::PreToolUse, &hooks.pre_tool_use),
         (HookEventKind::PostToolUse, &hooks.post_tool_use),
-        (HookEventKind::PostToolUseFailure, &hooks.post_tool_use_failure),
+        (
+            HookEventKind::PostToolUseFailure,
+            &hooks.post_tool_use_failure,
+        ),
     ] {
         push_bucket(&mut table, kind, entries, builtins, rt)?;
     }
@@ -133,14 +136,11 @@ fn resolve_prompt_provider(
     rt: &HookEngineCtx<'_>,
 ) -> Result<Arc<dyn LlmProvider>, HookEngineBuildError> {
     let model_id = spec.model.as_deref().unwrap_or(rt.default_model);
-    let entry = rt
-        .registry
-        .entry_for_model(model_id)
-        .ok_or_else(|| {
-            HookEngineBuildError::Configuration(format!(
-                "prompt hook references unknown model `{model_id}` (no provider registered for it)"
-            ))
-        })?;
+    let entry = rt.registry.entry_for_model(model_id).ok_or_else(|| {
+        HookEngineBuildError::Configuration(format!(
+            "prompt hook references unknown model `{model_id}` (no provider registered for it)"
+        ))
+    })?;
     Ok(Arc::clone(entry.provider()))
 }
 

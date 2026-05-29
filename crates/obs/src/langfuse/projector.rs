@@ -34,8 +34,8 @@ use std::collections::HashMap;
 use agent_client_protocol::schema::{
     ContentBlock, StopReason, ToolCallStatus, ToolCallUpdateFields,
 };
-use defect_agent::event::AgentEvent;
-use defect_agent::llm::Usage;
+use defect_agent::event::{AgentEvent, LlmRequestSnapshot};
+use defect_agent::llm::{Message, MessageContent, Role, Usage};
 
 use super::model::{EventKind, IngestionEvent, ObservationBody, ObservationLevel, TraceBody};
 
@@ -47,6 +47,10 @@ pub struct TraceProjector {
     session_id: String,
     /// 当前 turn 的状态；`None` 表示不在 turn 内（TurnStarted 之前）。
     turn: Option<TurnState>,
+    /// 暂存的用户 prompt 文本。主循环**先发 `UserPromptCommitted` 再发
+    /// `TurnStarted`**（turn.rs:197 先于 :212），所以收到 prompt 时 turn 还没建——
+    /// 先存这里，`TurnStarted` 建 `TurnState` 时再取进去。
+    pending_input: Option<String>,
 }
 
 /// 单个 turn（= 一个 langfuse trace）的累积状态。
@@ -54,16 +58,31 @@ struct TurnState {
     trace_id: String,
     /// 用户 prompt 文本，TurnStarted 后由 UserPromptCommitted 填，写进 trace input。
     input: Option<String>,
-    /// 第几次 LLM 调用——派生 generation id，并跟踪“当前” generation。
+    /// 第几次 LLM 调用——派生 generation id。
     call_seq: u32,
-    /// 当前进行中的 generation id（最近一次 LlmCallStarted），用于累积助手输出。
-    current_gen_id: Option<String>,
-    /// 当前 generation 累积的助手文本（含 thinking 单独累积）。
-    gen_output: String,
+    /// 当前进行中的 generation（最近一次 LlmCallStarted 建立）。
+    ///
+    /// 关键：generation 的 output / thinking 是在 `LlmCallStarted` 之后才流式到达的
+    /// （`LlmCallFinished` 也早于流），所以 generation 的收尾（generation-update）
+    /// **延迟**到下一次 `LlmCallStarted` 或 `TurnEnded` 时才发——保证 create 永远
+    /// 先于 update（修复 “observation not found”）。
+    current_gen: Option<PendingGeneration>,
     /// 整个 turn 的最终助手文本（写进 trace output）。
     final_output: String,
     /// 工具调用 id → 已分配的 span id（Started/Finished 跨事件配对）。
     tool_spans: HashMap<String, String>,
+}
+
+/// 进行中的 generation 累积状态。收尾时一次性 flush 成 generation-update。
+struct PendingGeneration {
+    id: String,
+    model: String,
+    /// 累积的助手回复正文。
+    output: String,
+    /// 累积的 thinking 文本（放进 generation 的 metadata.reasoning，不进 output）。
+    thinking: String,
+    /// 失败信息（来自 LlmCallFinished.error）。
+    error: Option<String>,
 }
 
 impl TurnState {
@@ -72,8 +91,7 @@ impl TurnState {
             trace_id,
             input: None,
             call_seq: 0,
-            current_gen_id: None,
-            gen_output: String::new(),
+            current_gen: None,
             final_output: String::new(),
             tool_spans: HashMap::new(),
         }
@@ -86,6 +104,7 @@ impl TraceProjector {
         Self {
             session_id: session_id.into(),
             turn: None,
+            pending_input: None,
         }
     }
 
@@ -103,24 +122,26 @@ impl TraceProjector {
                 self.on_user_prompt(&content);
                 Vec::new()
             }
-            AgentEvent::LlmCallStarted { model, attempt } => {
-                self.on_llm_started(model, attempt, now, new_id)
-            }
-            AgentEvent::AssistantText { content } => {
-                self.accumulate_output(&content);
-                Vec::new()
-            }
-            AgentEvent::AssistantThought { .. } => {
-                // thinking 不计入 generation output（避免污染对话内容）；
-                // 如需展示可后续单独建 observation。本期忽略。
-                Vec::new()
-            }
-            AgentEvent::LlmCallFinished {
+            AgentEvent::LlmCallStarted {
                 model,
                 attempt,
-                usage,
-                error,
-            } => self.on_llm_finished(&model, attempt, usage, error, now, new_id),
+                request,
+            } => self.on_llm_started(model, attempt, request.as_ref(), now, new_id),
+            AgentEvent::AssistantText { content } => {
+                self.accumulate_text(&content);
+                Vec::new()
+            }
+            AgentEvent::AssistantThought { content } => {
+                self.accumulate_thinking(&content);
+                Vec::new()
+            }
+            AgentEvent::LlmCallFinished { error, .. } => {
+                // 注意：LlmCallFinished 在流式响应**之前**到达，usage 此时为空、
+                // output 还没来。所以这里只记录 error，generation 的收尾（output/
+                // thinking/endTime）延迟到下一次 LlmCallStarted 或 TurnEnded。
+                self.note_llm_error(error);
+                Vec::new()
+            }
             AgentEvent::ToolCallStarted { id, name, fields } => {
                 self.on_tool_started(id.to_string(), name, fields.raw_input, now, new_id)
             }
@@ -150,15 +171,20 @@ impl TraceProjector {
         new_id: &mut dyn FnMut() -> String,
     ) -> Vec<IngestionEvent> {
         let trace_id = new_id();
-        self.turn = Some(TurnState::new(trace_id.clone()));
+        let mut state = TurnState::new(trace_id.clone());
+        // 取走 TurnStarted 之前暂存的用户 prompt。
+        state.input = self.pending_input.take();
         let body = TraceBody {
             id: trace_id,
             name: Some("turn".into()),
             session_id: Some(self.session_id.clone()),
+            // trace-create 时就带上 input，UI 立刻能看到用户输入（不必等 TurnEnded）。
+            input: state.input.clone().map(serde_json::Value::String),
             environment: Some(DEFAULT_ENVIRONMENT.into()),
             timestamp: Some(now.to_string()),
             ..Default::default()
         };
+        self.turn = Some(state);
         vec![IngestionEvent::trace(
             new_id(),
             now.to_string(),
@@ -169,10 +195,10 @@ impl TraceProjector {
 
     fn on_user_prompt(&mut self, content: &[ContentBlock]) {
         let text = content_text(content);
-        if let Some(turn) = self.turn.as_mut()
-            && !text.is_empty()
-        {
-            turn.input = Some(text);
+        if !text.is_empty() {
+            // 主循环先发 UserPromptCommitted 再发 TurnStarted，此刻 turn 尚未建立——
+            // 暂存，等 on_turn_started 取走。
+            self.pending_input = Some(text);
         }
     }
 
@@ -180,16 +206,26 @@ impl TraceProjector {
         &mut self,
         model: String,
         attempt: u32,
+        request: &LlmRequestSnapshot,
         now: &str,
         new_id: &mut dyn FnMut() -> String,
     ) -> Vec<IngestionEvent> {
+        // 先收尾上一个 generation（若有）——保证它的 generation-update 在本次
+        // generation-create 之前发出。
+        let mut events = self.flush_generation(now, new_id);
+
         let Some(turn) = self.turn.as_mut() else {
-            return Vec::new();
+            return events;
         };
         turn.call_seq += 1;
         let gen_id = format!("{}-gen-{}", turn.trace_id, turn.call_seq);
-        turn.current_gen_id = Some(gen_id.clone());
-        turn.gen_output.clear();
+        turn.current_gen = Some(PendingGeneration {
+            id: gen_id.clone(),
+            model: model.clone(),
+            output: String::new(),
+            thinking: String::new(),
+            error: None,
+        });
 
         let mut meta = serde_json::Map::new();
         meta.insert("attempt".into(), attempt.into());
@@ -200,57 +236,87 @@ impl TraceProjector {
             name: Some("llm_call".into()),
             model: Some(model),
             start_time: Some(now.to_string()),
+            // input = 标准 chat messages 数组（system 作为第一条 {role:"system"}）。
+            input: Some(request_to_input(request)),
             metadata: Some(serde_json::Value::Object(meta)),
             environment: Some(DEFAULT_ENVIRONMENT.into()),
             ..Default::default()
         };
-        vec![IngestionEvent::observation(
+        events.push(IngestionEvent::observation(
             new_id(),
             now.to_string(),
             EventKind::GenerationCreate,
             &body,
-        )]
+        ));
+        events
     }
 
-    fn accumulate_output(&mut self, content: &ContentBlock) {
-        if let Some(turn) = self.turn.as_mut()
-            && let ContentBlock::Text(text) = content
+    /// 助手回复正文增量 → 累积到当前 generation 的 output + turn 的 final_output。
+    fn accumulate_text(&mut self, content: &ContentBlock) {
+        if let ContentBlock::Text(text) = content
+            && let Some(turn) = self.turn.as_mut()
         {
-            turn.gen_output.push_str(&text.text);
             turn.final_output.push_str(&text.text);
+            if let Some(pg) = turn.current_gen.as_mut() {
+                pg.output.push_str(&text.text);
+            }
         }
     }
 
-    fn on_llm_finished(
+    /// thinking 增量 → 累积到当前 generation 的 thinking（最终进 metadata.reasoning）。
+    fn accumulate_thinking(&mut self, content: &ContentBlock) {
+        if let ContentBlock::Text(text) = content
+            && let Some(turn) = self.turn.as_mut()
+            && let Some(pg) = turn.current_gen.as_mut()
+        {
+            pg.thinking.push_str(&text.text);
+        }
+    }
+
+    /// 记录 LLM 调用错误（LlmCallFinished.error）到当前 generation，收尾时写出。
+    fn note_llm_error(&mut self, error: Option<String>) {
+        if let Some(err) = error
+            && let Some(turn) = self.turn.as_mut()
+            && let Some(pg) = turn.current_gen.as_mut()
+        {
+            pg.error = Some(err);
+        }
+    }
+
+    /// 收尾当前 generation：把累积的 output / thinking / error / endTime 一次性
+    /// flush 成 generation-update。无进行中 generation 时是 no-op。
+    ///
+    /// 在“下一次 LlmCallStarted”和“TurnEnded”两处调用——保证 update 永远在
+    /// 对应的 create 之后、且数据已流式到齐。
+    fn flush_generation(
         &mut self,
-        model: &str,
-        _attempt: u32,
-        usage: Usage,
-        error: Option<String>,
         now: &str,
         new_id: &mut dyn FnMut() -> String,
     ) -> Vec<IngestionEvent> {
         let Some(turn) = self.turn.as_mut() else {
             return Vec::new();
         };
-        // 用当前 generation id；若没有（异常），跳过。
-        let Some(gen_id) = turn.current_gen_id.clone() else {
+        let Some(pg) = turn.current_gen.take() else {
             return Vec::new();
         };
-        let output = std::mem::take(&mut turn.gen_output);
+
+        let mut meta = serde_json::Map::new();
+        if !pg.thinking.is_empty() {
+            // thinking/reasoning 没有 ingestion 专用字段——放 metadata，不污染 output。
+            meta.insert("reasoning".into(), serde_json::Value::String(pg.thinking));
+        }
 
         let body = ObservationBody {
-            id: gen_id,
+            id: pg.id,
             trace_id: turn.trace_id.clone(),
-            model: Some(model.to_string()),
+            model: Some(pg.model),
             end_time: Some(now.to_string()),
-            output: (!output.is_empty()).then_some(serde_json::Value::String(output)),
-            usage_details: usage_to_details(&usage),
-            level: error.as_ref().map(|_| ObservationLevel::Error),
-            status_message: error,
+            output: (!pg.output.is_empty()).then_some(serde_json::Value::String(pg.output)),
+            metadata: (!meta.is_empty()).then_some(serde_json::Value::Object(meta)),
+            level: pg.error.as_ref().map(|_| ObservationLevel::Error),
+            status_message: pg.error,
             ..Default::default()
         };
-        turn.current_gen_id = None;
         vec![IngestionEvent::observation(
             new_id(),
             now.to_string(),
@@ -306,10 +372,7 @@ impl TraceProjector {
             .remove(tool_call_id)
             .unwrap_or_else(|| format!("{}-tool-{}", turn.trace_id, tool_call_id));
 
-        let failed = matches!(
-            fields.status,
-            Some(ToolCallStatus::Failed)
-        );
+        let failed = matches!(fields.status, Some(ToolCallStatus::Failed));
         let body = ObservationBody {
             id: span_id,
             trace_id: turn.trace_id.clone(),
@@ -364,8 +427,11 @@ impl TraceProjector {
         now: &str,
         new_id: &mut dyn FnMut() -> String,
     ) -> Vec<IngestionEvent> {
+        // 先收尾仍进行中的 generation（其 update 须在 trace 收尾前发出）。
+        let mut events = self.flush_generation(now, new_id);
+
         let Some(turn) = self.turn.take() else {
-            return Vec::new();
+            return events;
         };
         let mut meta = serde_json::Map::new();
         meta.insert(
@@ -386,13 +452,14 @@ impl TraceProjector {
             timestamp: Some(now.to_string()),
             ..Default::default()
         };
-        vec![IngestionEvent::trace(
+        events.push(IngestionEvent::trace(
             new_id(),
             now.to_string(),
             // 同 trace_id 二次发送 = 更新（合并 endTime/output/metadata）。
             EventKind::TraceCreate,
             &body,
-        )]
+        ));
+        events
     }
 }
 
@@ -423,4 +490,70 @@ fn content_text(content: &[ContentBlock]) -> String {
         }
     }
     out
+}
+
+/// 把请求快照还原成 langfuse generation 的标准 `input`：chat messages 数组。
+///
+/// system prompt 作为第一条 `{role:"system"}`，随后是完整 messages 历史。
+/// 这是 Langfuse SDK 的标准格式（见 observation-types 文档）——UI 能渲染成
+/// 对话气泡、支持 playground 重放。
+fn request_to_input(request: &LlmRequestSnapshot) -> serde_json::Value {
+    let mut messages: Vec<serde_json::Value> = Vec::new();
+    if let Some(system) = &request.system {
+        messages.push(serde_json::json!({ "role": "system", "content": system }));
+    }
+    for msg in &request.messages {
+        messages.push(message_to_value(msg));
+    }
+    serde_json::Value::Array(messages)
+}
+
+/// 单条 [`Message`] → langfuse `{role, content}`。content 把多模态块降级成
+/// 文本 / 结构化片段（langfuse input 接受任意 JSON，UI 尽力渲染）。
+fn message_to_value(msg: &Message) -> serde_json::Value {
+    let role = match msg.role {
+        Role::User => "user",
+        Role::Assistant => "assistant",
+    };
+    let parts: Vec<serde_json::Value> = msg.content.iter().map(content_to_value).collect();
+    // 单条纯文本时直接用字符串 content（最常见、最易读）；否则用数组。
+    let content = match parts.as_slice() {
+        [serde_json::Value::String(s)] => serde_json::Value::String(s.clone()),
+        _ => serde_json::Value::Array(parts),
+    };
+    serde_json::json!({ "role": role, "content": content })
+}
+
+/// [`MessageContent`] → langfuse content 片段。
+fn content_to_value(content: &MessageContent) -> serde_json::Value {
+    match content {
+        MessageContent::Text { text } => serde_json::Value::String(text.clone()),
+        MessageContent::Thinking { text, .. } => {
+            serde_json::json!({ "type": "thinking", "text": text })
+        }
+        MessageContent::ToolUse { id, name, args } => {
+            serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": args })
+        }
+        MessageContent::ToolResult {
+            tool_use_id,
+            is_error,
+            ..
+        } => serde_json::json!({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "is_error": is_error,
+        }),
+        MessageContent::Image { mime, .. } => {
+            serde_json::json!({ "type": "image", "mime": mime })
+        }
+        MessageContent::ProviderActivity {
+            provider_id, kind, ..
+        } => serde_json::json!({
+            "type": "provider_activity",
+            "provider_id": provider_id,
+            "kind": format!("{kind:?}"),
+        }),
+        // MessageContent 是 #[non_exhaustive]：未来新增的块降级成一个标记。
+        _ => serde_json::json!({ "type": "unknown" }),
+    }
 }

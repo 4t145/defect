@@ -26,7 +26,7 @@ use http_body_util::{BodyExt, Full};
 use tokio::sync::{mpsc, oneshot};
 use tower::ServiceExt;
 
-use super::model::{IngestionBatch, IngestionEvent};
+use super::model::{IngestionBatch, IngestionEvent, IngestionResponse};
 
 /// 后台任务的指令。
 enum Cmd {
@@ -191,22 +191,54 @@ impl Worker {
         }
     }
 
-    /// 检查响应。Langfuse 输入错误不返 4xx，而是 207 带 `{errors, successes}`。
+    /// 检查响应。
+    ///
+    /// Langfuse ingestion 端点对批量请求**始终返回 207 Multi-Status**——逐条结果
+    /// 在 body 的 `successes` / `errors` 里。所以：
+    /// - **2xx（含 207）**：解析 body，仅当 `errors` **非空**时 warn（部分失败）；
+    ///   全成功（errors 空）静默返回——这是正常路径，不是错误。
+    /// - **非 2xx**（401/403/5xx 等真错误）：原样 warn。
     async fn inspect_response(&self, resp: http::Response<hyper::body::Incoming>) {
         let status = resp.status();
-        if status.is_success() && status.as_u16() != 207 {
-            return;
-        }
-        // 207 或非 2xx：收集 body 用于诊断（只读一小段，避免大响应）。
         let body = match resp.into_body().collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(err) => {
-                tracing::warn!(%status, %err, "langfuse: ingestion non-OK; body unreadable");
+                tracing::warn!(%status, %err, "langfuse: ingestion response body unreadable");
                 return;
             }
         };
+
+        if status.is_success() {
+            // 解析逐条结果，只在真有失败条目时告警。
+            match serde_json::from_slice::<IngestionResponse>(&body) {
+                Ok(parsed) if parsed.errors.is_empty() => {
+                    // 正常路径：全部成功，静默。
+                    tracing::trace!(
+                        succeeded = parsed.successes.len(),
+                        "langfuse: ingestion batch accepted"
+                    );
+                }
+                Ok(parsed) => {
+                    tracing::warn!(
+                        failed = parsed.errors.len(),
+                        succeeded = parsed.successes.len(),
+                        errors = ?parsed.errors,
+                        "langfuse: some ingestion events rejected"
+                    );
+                }
+                Err(err) => {
+                    // 2xx 但 body 不是预期结构——记一条 debug，不当错误处理。
+                    let snippet = String::from_utf8_lossy(&body);
+                    let snippet = snippet.chars().take(512).collect::<String>();
+                    tracing::debug!(%status, %err, body = %snippet, "langfuse: unrecognized ingestion response");
+                }
+            }
+            return;
+        }
+
+        // 非 2xx：真错误（鉴权失败 / 服务端错误等）。
         let snippet = String::from_utf8_lossy(&body);
         let snippet = snippet.chars().take(1024).collect::<String>();
-        tracing::warn!(%status, body = %snippet, "langfuse: ingestion returned errors");
+        tracing::warn!(%status, body = %snippet, "langfuse: ingestion request failed");
     }
 }

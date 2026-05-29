@@ -125,7 +125,7 @@ impl MessageStats {
             crate::llm::Role::Assistant => self.assistant_messages += 1,
         }
 
-        for content in &message.content {
+        for content in message.content.iter() {
             match content {
                 MessageContent::Text { text } => {
                     self.text_blocks += 1;

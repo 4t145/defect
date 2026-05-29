@@ -17,12 +17,14 @@
 //! 数据结构**（`ToolCallUpdateFields`、`ContentBlock`、`StopReason` 等），
 //! 避免重新发明字段。
 
+use std::sync::Arc;
+
 use agent_client_protocol::schema::{
     ContentBlock, PermissionOptionId, StopReason as AcpStopReason, ToolCallId, ToolCallUpdateFields,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::llm::Usage;
+use crate::llm::{Message, Usage};
 use crate::policy::PolicyDecision;
 
 /// agent 主循环对外发布的事件。
@@ -99,6 +101,18 @@ pub enum AgentEvent {
         model: String,
         /// 第几次尝试（首次为 1）。重试由主循环驱动。
         attempt: u32,
+        /// 本次调用发给 provider 的请求快照（system + 完整 messages 历史）。
+        ///
+        /// 供 observability 把 generation 的 `input` 还原成标准 chat messages
+        /// 数组（含 system 一条）。不入 wire；storage 当前忽略此字段。
+        ///
+        /// 用 `Arc` 包裹：事件经 [`crate::session::EventEmitter`] fan-out 给每个
+        /// 订阅者时会 `clone` 一次，长上下文下整份 messages 历史被多次深拷贝代价
+        /// 很高。快照进事件后只读，`Arc` 让 clone 退化成引用计数。
+        /// `#[serde(skip)]`：`AgentEvent` 的 serde derive 目前无人实际使用，且
+        /// 不想为它启用 serde 的 `rc` feature——反序列化时此字段取默认空快照。
+        #[serde(skip)]
+        request: Arc<LlmRequestSnapshot>,
     },
 
     /// 一次 LLM provider 调用结束。`error` 为 `Some` 表示失败（按 retry
@@ -116,6 +130,19 @@ pub enum AgentEvent {
         tokens_before: u64,
         tokens_after: u64,
     },
+}
+
+/// 一次 LLM 调用的请求快照——只带 observability 还原 generation `input`
+/// 所需的部分（system + 完整 messages 历史）。不含 tools / sampling 等。
+///
+/// 单独定义而非直接塞 `CompletionRequest`：避免 `AgentEvent` 依赖整个请求类型，
+/// 也让快照保持最小、序列化稳定。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LlmRequestSnapshot {
+    /// 系统提示词（若有）。observability 把它还原成 `{role:"system"}` 一条。
+    pub system: Option<Arc<str>>,
+    /// 本次发给 provider 的完整 messages 历史。
+    pub messages: Vec<Message>,
 }
 
 /// 用户对 `Ask` 的应答。

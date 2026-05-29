@@ -120,10 +120,10 @@ impl HookHandler for PromptHandler {
                     .model
                     .clone()
                     .unwrap_or_else(|| self.spec.fallback_model.clone()),
-                system: Some(self.spec.system.clone()),
+                system: Some(Arc::from(self.spec.system.as_str())),
                 messages: vec![Message {
                     role: Role::User,
-                    content: vec![MessageContent::Text { text: user_text }],
+                    content: Arc::from([MessageContent::Text { text: user_text }]),
                 }],
                 tools: Vec::new(),
                 tool_choice: ToolChoice::None,
@@ -150,9 +150,7 @@ impl HookHandler for PromptHandler {
     }
 }
 
-async fn collect_text(
-    mut stream: crate::llm::ProviderStream,
-) -> Result<String, HookError> {
+async fn collect_text(mut stream: crate::llm::ProviderStream) -> Result<String, HookError> {
     let mut out = String::new();
     while let Some(chunk) = stream.next().await {
         match chunk {
@@ -439,11 +437,7 @@ mod test {
         let cwd = Path::new("/");
         let ev = HookEvent::UserPromptSubmit { content: &[] };
         // tool_error 在 UserPromptSubmit 上不存在
-        let rendered = render_template(
-            "before/{{tool_error}}/after",
-            &ev,
-            &ctx(&session_id, cwd),
-        );
+        let rendered = render_template("before/{{tool_error}}/after", &ev, &ctx(&session_id, cwd));
         assert_eq!(rendered, "before//after");
     }
 

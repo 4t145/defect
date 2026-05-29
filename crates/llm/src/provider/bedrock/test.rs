@@ -27,7 +27,8 @@ fn minimal_request() -> CompletionRequest {
             role: Role::User,
             content: vec![MessageContent::Text {
                 text: USER_TEXT.to_string(),
-            }],
+            }]
+            .into(),
         }],
         tools: Vec::new(),
         tool_choice: ToolChoice::Auto,

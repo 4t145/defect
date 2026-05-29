@@ -95,7 +95,7 @@ fn encode_minimal_request() {
         system: Some("you are helpful".into()),
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "hi".into() }],
+            content: vec![MessageContent::Text { text: "hi".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -150,7 +150,7 @@ fn encode_request_carries_sampling() {
         system: None,
         messages: vec![Message {
             role: Role::User,
-            content: vec![MessageContent::Text { text: "x".into() }],
+            content: vec![MessageContent::Text { text: "x".into() }].into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Required,
@@ -194,7 +194,8 @@ fn encode_request_tool_uses_and_results() {
                     id: "toolu_1".into(),
                     name: "fs_read".into(),
                     args: json!({"path": "/tmp/a"}),
-                }],
+                }]
+                .into(),
             },
             Message {
                 role: Role::User,
@@ -204,7 +205,8 @@ fn encode_request_tool_uses_and_results() {
                         text: "hello".into(),
                     },
                     is_error: false,
-                }],
+                }]
+                .into(),
             },
         ],
         tools: vec![ToolSchema {
@@ -289,7 +291,8 @@ fn encode_with_thinking(text: &str, signature: Option<&str>) -> Vec<wire::Conten
                 MessageContent::Text {
                     text: "answer".into(),
                 },
-            ],
+            ]
+            .into(),
         }],
         tools: vec![],
         tool_choice: ToolChoice::Auto,

@@ -412,7 +412,8 @@ async fn load_session_restores_history_for_next_turn() {
             role: defect_agent::llm::Role::User,
             content: vec![defect_agent::llm::MessageContent::Text {
                 text: "restored".to_string(),
-            }],
+            }]
+            .into(),
         }],
     };
 

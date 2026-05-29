@@ -240,7 +240,7 @@ async fn missing_bearer_header_results_in_404() {
         system: None,
         messages: vec![defect_agent::llm::Message {
             role: defect_agent::llm::Role::User,
-            content: vec![defect_agent::llm::MessageContent::Text { text: "hi".into() }],
+            content: vec![defect_agent::llm::MessageContent::Text { text: "hi".into() }].into(),
         }],
         tools: vec![],
         tool_choice: defect_agent::llm::ToolChoice::Auto,

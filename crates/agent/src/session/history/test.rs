@@ -6,7 +6,8 @@ fn user(text: &str) -> Message {
         role: Role::User,
         content: vec![MessageContent::Text {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
     }
 }
 

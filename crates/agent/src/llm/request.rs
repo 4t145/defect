@@ -2,6 +2,8 @@
 //!
 //! 设计详见 `docs/internal/llm-trait.md` 第 3 节。
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::llm::capability::HostedCapabilities;
@@ -11,7 +13,10 @@ use crate::tool::ToolSchema;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompletionRequest {
     pub model: String,
-    pub system: Option<String>,
+    /// 系统提示词。用 `Arc<str>` 而非 `String`：请求在 turn 主循环里会被
+    /// `clone`（发给 provider、随 `LlmCallStarted` 事件 fan-out），长 system
+    /// prompt 反复深拷贝代价高；`Arc` 让 clone 退化成引用计数。
+    pub system: Option<Arc<str>>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolSchema>,
     pub tool_choice: ToolChoice,
@@ -30,7 +35,10 @@ pub struct CompletionRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
-    pub content: Vec<MessageContent>,
+    /// 内容片段。用 `Arc<[_]>` 而非 `Vec`：历史 `snapshot()`、`complete()` 的
+    /// 请求 clone、`LlmCallStarted` 事件 fan-out 都会整体 clone messages，长上下文
+    /// 下深拷贝代价高；`Arc` 让 clone 退化成引用计数。进了历史即只读，正合适。
+    pub content: Arc<[MessageContent]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

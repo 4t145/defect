@@ -13,12 +13,41 @@
 //! 我们只覆盖接入需要的事件类型与字段；Langfuse 的完整 schema 比这宽，
 //! 未用到的字段一律不发（`skip_serializing_if = "Option::is_none"`）。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 一次 ingestion 请求体。
 #[derive(Debug, Clone, Serialize)]
 pub struct IngestionBatch {
     pub batch: Vec<IngestionEvent>,
+}
+
+/// ingestion 端点的响应体。
+///
+/// **注意**：该端点对批量请求**始终返回 207 Multi-Status**（即便逐条全部成功）；
+/// 逐条结果分散在 `successes`（含各自 HTTP status，成功为 201）与 `errors` 里。
+/// 因此“是否真出错”只能看 `errors` 是否非空，**不能**凭 207 状态码判断。
+#[derive(Debug, Clone, Deserialize)]
+pub struct IngestionResponse {
+    #[serde(default)]
+    pub successes: Vec<IngestionSuccess>,
+    #[serde(default)]
+    pub errors: Vec<IngestionError>,
+}
+
+/// 单条成功结果。
+#[derive(Debug, Clone, Deserialize)]
+pub struct IngestionSuccess {
+    pub id: String,
+    pub status: u16,
+}
+
+/// 单条失败结果。字段尽量宽松——只用于诊断日志，未知字段忽略。
+#[derive(Debug, Clone, Deserialize)]
+pub struct IngestionError {
+    pub id: String,
+    pub status: u16,
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// 单个事件信封。`type` 是 oneOf 判别字段，`body` 随类型而异。
@@ -134,7 +163,12 @@ pub struct ObservationBody {
 
 impl IngestionEvent {
     /// 包一个 trace 事件。
-    pub fn trace(envelope_id: String, timestamp: String, kind: EventKind, body: &TraceBody) -> Self {
+    pub fn trace(
+        envelope_id: String,
+        timestamp: String,
+        kind: EventKind,
+        body: &TraceBody,
+    ) -> Self {
         Self {
             id: envelope_id,
             kind,
