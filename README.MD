@@ -13,6 +13,7 @@ Defect 的远期目标是：让您在冰箱上也能运行Agent
 3. **ACP 原生**，我们不绑定一个cli，而是鼓励您通过ACP来和Defect交互
 
 ## 安装
+
 目前，本项目还在开发中，您可以通过在项目下执行`just install-force`来安装当前编译产物。
 
 ## 配置
@@ -51,18 +52,18 @@ file = "AGENTS.md"
 
 ## CLI 可接入能力一览
 
-| 能力域 | 支持项 | 配置入口 | lib 模块 |
-| --- | --- | --- | --- |
-| Provider | echo / anthropic / openai / deepseek / litellm / bedrock / custom（OpenAI 或 Anthropic-Messages） | `[default].provider`、`[providers.*]`、`--provider` / `DEFECT_PROVIDER` | `defect_cli::providers` |
-| Tool（进程内） | bash / read_file / write_file / edit_file / fetch / search | `[tools.*]` | `defect_cli::tools` |
-| Tool（hosted） | web_search | `[capabilities.web_search]`（详见 [capabilities.md](docs/internal/capabilities.md)） | provider adapter |
-| Tool（MCP） | stdio / http / sse 三种 transport，按 `enabled_servers` 白名单装配 | `[mcp]` | `defect_cli::mcp_servers` |
-| Sandbox | read-only / ask-writes / open / deny-all | `[sandbox].mode` | `defect_cli::policy` |
-| Hook | 5 件套 sync 事件 × 3 种 handler（builtin / command / prompt），详见 [hooks.md](docs/internal/hooks.md) | `[hooks.*]` | `defect_cli::hooks` |
-| HTTP 栈 / 代理 | 超时、重试、退避、UA、from-env / disabled / explicit 代理 | `[http]` | `defect_cli::http_stack` |
-| Storage | session 持久化、resume | — | `defect_storage`（默认根目录由 `defect_cli::paths` 解析） |
-| Tracing | EnvFilter（stderr，自动 ANSI），OTLP endpoint schema 已落地 | `RUST_LOG` / `[tracing]` | `defect_cli::tracing_init` |
-| CLI 参数 | `--provider` / `--model` / `--config key.path=value`（多次） | — | `defect_cli::args` |
+| 能力域         | 支持项                                                                                                 | 配置入口                                                                             | lib 模块                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Provider       | echo / anthropic / openai / deepseek / litellm / bedrock / custom（OpenAI 或 Anthropic-Messages）      | `[default].provider`、`[providers.*]`、`--provider` / `DEFECT_PROVIDER`              | `defect_cli::providers`                                   |
+| Tool（进程内） | bash / read_file / write_file / edit_file / fetch / search                                             | `[tools.*]`                                                                          | `defect_cli::tools`                                       |
+| Tool（hosted） | web_search                                                                                             | `[capabilities.web_search]`（详见 [capabilities.md](docs/internal/capabilities.md)） | provider adapter                                          |
+| Tool（MCP）    | stdio / streamable-http，按 `enabled_servers` 白名单装配                                               | `[mcp]`                                                                              | `defect_cli::mcp_servers`                                 |
+| Sandbox        | read-only / ask-writes / open / deny-all                                                               | `[sandbox].mode`                                                                     | `defect_cli::policy`                                      |
+| Hook           | 5 件套 sync 事件 × 3 种 handler（builtin / command / prompt），详见 [hooks.md](docs/internal/hooks.md) | `[hooks.*]`                                                                          | `defect_cli::hooks`                                       |
+| HTTP 栈 / 代理 | 超时、重试、退避、UA、from-env / disabled / explicit 代理                                              | `[http]`                                                                             | `defect_cli::http_stack`                                  |
+| Storage        | session 持久化、resume                                                                                 | —                                                                                    | `defect_storage`（默认根目录由 `defect_cli::paths` 解析） |
+| Tracing        | EnvFilter（stderr，自动 ANSI），OTLP endpoint schema 已落地                                            | `RUST_LOG` / `[tracing]`                                                             | `defect_cli::tracing_init`                                |
+| CLI 参数       | `--provider` / `--model` / `--config key.path=value`（多次）                                           | —                                                                                    | `defect_cli::args`                                        |
 
 字段级细节（每家 provider 的可选项、每个 tool 的限额、hook 5 件套 outcome 表等）见 [`docs/internal/config.md`](docs/internal/config.md) 与各专题文档。
 
@@ -75,6 +76,7 @@ file = "AGENTS.md"
 3. 其他 helper 直接 `use defect_cli::{tools, mcp_servers, paths, ...}` 复用
 
 裁剪建议：
+
 - 不需要 hook 系统？传 `Arc::new(NoopHookEngine)` 即可，引擎本身零开销
 - 不需要 MCP？skip `session_tool_factory`
 - 不需要持久化？skip `observe_session` / `session_loader`
