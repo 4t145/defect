@@ -1,4 +1,5 @@
-use super::{LITELLM_API_KEY_ENV, LITELLM_DEFAULT_BASE_URL, ProviderDefaults, build_policy};
+use crate::policy::build_policy;
+use crate::providers::{LITELLM_API_KEY_ENV, LITELLM_DEFAULT_BASE_URL, ProviderDefaults};
 
 use defect_agent::policy::{PolicyCtx, PolicyDecision};
 use defect_agent::tool::SafetyClass;
