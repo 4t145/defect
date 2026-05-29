@@ -1,9 +1,12 @@
 use crate::policy::build_policy;
+#[cfg(feature = "provider-openai")]
 use crate::providers::{LITELLM_API_KEY_ENV, LITELLM_DEFAULT_BASE_URL, ProviderDefaults};
 
 use defect_agent::policy::{PolicyCtx, PolicyDecision};
 use defect_agent::tool::SafetyClass;
-use defect_config::{ProviderConfigFile, SandboxMode};
+#[cfg(feature = "provider-openai")]
+use defect_config::ProviderConfigFile;
+use defect_config::SandboxMode;
 use serde_json::json;
 
 #[test]
@@ -33,6 +36,7 @@ fn open_policy_allows_destructive_tools() {
     assert!(matches!(decision, PolicyDecision::Allow));
 }
 
+#[cfg(feature = "provider-openai")]
 #[test]
 fn litellm_defaults_fill_endpoint_and_credential_env() {
     let provider = ProviderDefaults {

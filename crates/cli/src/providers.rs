@@ -11,6 +11,8 @@
 //!
 //! [`ProviderKind`]: defect_config::ProviderKind
 
+// BTreeMap/HashMap + http header 类型仅 provider_headers（openai）用。
+#[cfg(feature = "provider-openai")]
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -21,22 +23,37 @@ use defect_agent::llm::{
 use defect_agent::session::{SessionCapabilitiesConfig, TurnConfig};
 use defect_config::{
     LoadedConfig, ProviderConfigFile, ProviderConfigs, ProviderKind as ConfigProviderKind,
-    ProviderProtocol, ReasoningEffort as ConfigReasoningEffort,
+    ProviderProtocol,
 };
+// 仅 reasoning-effort 映射用，随 openai/deepseek 编入。
+#[cfg(any(feature = "provider-openai", feature = "provider-deepseek"))]
+use defect_config::ReasoningEffort as ConfigReasoningEffort;
+#[cfg(any(feature = "provider-openai", feature = "provider-deepseek"))]
 use defect_llm::protocol::openai_chat::ReasoningEffort as LlmReasoningEffort;
+#[cfg(feature = "provider-anthropic")]
 use defect_llm::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+#[cfg(feature = "provider-bedrock")]
 use defect_llm::provider::bedrock::{BedrockConfig, BedrockProvider};
+#[cfg(feature = "provider-deepseek")]
 use defect_llm::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
+#[cfg(feature = "provider-openai")]
 use defect_llm::provider::openai::{OpenAiConfig, OpenAiProvider};
+#[cfg(feature = "provider-openai")]
 use http::{HeaderName, HeaderValue};
 
 use crate::http_stack::build_http_stack_config;
 
 pub(crate) const BEDROCK_PROVIDER: &str = "bedrock";
+// LiteLLM 走 OpenAI provider，相关常量随 provider-openai 编入。
+#[cfg(feature = "provider-openai")]
 pub(crate) const LITELLM_API_KEY_ENV: &str = "LITELLM_API_KEY";
+#[cfg(feature = "provider-openai")]
 pub(crate) const LITELLM_DEFAULT_BASE_URL: &str = "http://localhost:4000/v1";
+#[cfg(feature = "provider-openai")]
 const CUSTOM_OPENAI_DISPLAY_NAME: &str = "Custom OpenAI-compatible";
+#[cfg(feature = "provider-bedrock")]
 const CUSTOM_BEDROCK_DISPLAY_NAME: &str = "Amazon Bedrock";
+#[cfg(feature = "provider-openai")]
 const LITELLM_DISPLAY_NAME: &str = "LiteLLM Gateway";
 
 /// 装配 provider registry 与默认 turn config。
@@ -103,6 +120,16 @@ pub async fn build_provider_entries(
 ///
 /// 下游二次开发想"自己换 OpenAI 实现"时——独立调用此函数构造默认
 /// 那家，再 push 一份自定义 entry 进 [`ProviderRegistry::new`]。
+// http_config 只被 anthropic/openai/deepseek 走 hyper 的 provider 用；bedrock 走
+// AWS SDK 自己的 transport、echo 无 transport。这些组合下参数未用，按需放行。
+#[cfg_attr(
+    not(any(
+        feature = "provider-anthropic",
+        feature = "provider-openai",
+        feature = "provider-deepseek"
+    )),
+    allow(unused_variables)
+)]
 pub async fn build_single_llm_provider(
     provider_kind: &ConfigProviderKind,
     config: &LoadedConfig,
@@ -110,6 +137,7 @@ pub async fn build_single_llm_provider(
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
     match provider_kind {
         ConfigProviderKind::Echo => Ok(Arc::new(EchoProvider::new()) as Arc<dyn LlmProvider>),
+        #[cfg(feature = "provider-anthropic")]
         ConfigProviderKind::Anthropic => Ok(Arc::new(
             AnthropicProvider::new(AnthropicConfig {
                 api_key: None,
@@ -119,12 +147,14 @@ pub async fn build_single_llm_provider(
             })
             .map_err(|e| anyhow::anyhow!("anthropic provider init failed: {e}"))?,
         ) as Arc<dyn LlmProvider>),
+        #[cfg(feature = "provider-openai")]
         ConfigProviderKind::Openai => build_openai_provider(
             "openai",
             "OpenAI Chat Completions",
             config.effective.providers.openai.clone(),
             http_config,
         ),
+        #[cfg(feature = "provider-deepseek")]
         ConfigProviderKind::Deepseek => Ok(Arc::new(
             DeepSeekProvider::new(DeepSeekConfig {
                 api_key: None,
@@ -140,9 +170,21 @@ pub async fn build_single_llm_provider(
             })
             .map_err(|e| anyhow::anyhow!("deepseek provider init failed: {e}"))?,
         ) as Arc<dyn LlmProvider>),
+        // LiteLLM 复用 OpenAI provider 实现，因此跟随 provider-openai。
+        #[cfg(feature = "provider-openai")]
         ConfigProviderKind::Litellm => {
             build_litellm_provider(config.effective.providers.litellm.clone(), http_config)
         }
+        // 被配置选中但未编译进本 build 的 provider：hard fail，给出可操作提示。
+        // echo 永远可用、不进这条；custom 单独在下方处理。
+        #[cfg(not(feature = "provider-anthropic"))]
+        ConfigProviderKind::Anthropic => Err(provider_not_compiled("anthropic")),
+        #[cfg(not(feature = "provider-openai"))]
+        ConfigProviderKind::Openai => Err(provider_not_compiled("openai")),
+        #[cfg(not(feature = "provider-deepseek"))]
+        ConfigProviderKind::Deepseek => Err(provider_not_compiled("deepseek")),
+        #[cfg(not(feature = "provider-openai"))]
+        ConfigProviderKind::Litellm => Err(provider_not_compiled("openai")),
         ConfigProviderKind::Custom(name) => {
             let Some(provider) = config
                 .effective
@@ -164,6 +206,7 @@ pub async fn build_single_llm_provider(
                 }
             });
             match protocol {
+                #[cfg(feature = "provider-openai")]
                 ProviderProtocol::OpenaiChat => build_openai_provider(
                     name,
                     provider
@@ -173,9 +216,18 @@ pub async fn build_single_llm_provider(
                     provider.clone(),
                     http_config,
                 ),
+                #[cfg(not(feature = "provider-openai"))]
+                ProviderProtocol::OpenaiChat => Err(provider_not_compiled("openai")),
                 ProviderProtocol::AnthropicMessages => {
                     if name == BEDROCK_PROVIDER || provider.aws.is_some() {
-                        build_bedrock_provider(name, provider.clone()).await
+                        #[cfg(feature = "provider-bedrock")]
+                        {
+                            build_bedrock_provider(name, provider.clone()).await
+                        }
+                        #[cfg(not(feature = "provider-bedrock"))]
+                        {
+                            Err(provider_not_compiled("bedrock"))
+                        }
                     } else {
                         Err(anyhow::anyhow!(
                             "custom provider `{name}` uses protocol `anthropic-messages`, \
@@ -186,6 +238,24 @@ pub async fn build_single_llm_provider(
             }
         }
     }
+}
+
+/// 被配置选中、但未通过 `provider-*` feature 编译进本 build 的 provider —— hard
+/// fail 并提示要开哪个 feature（遵循 fail-loud：不静默回退到 echo）。
+///
+/// 全 provider 开启时没有任何调用点，故仅在至少裁掉一家时编入。
+#[cfg(not(all(
+    feature = "provider-anthropic",
+    feature = "provider-bedrock",
+    feature = "provider-openai",
+    feature = "provider-deepseek"
+)))]
+fn provider_not_compiled(feature_suffix: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "provider was selected but not compiled into this build; \
+         rebuild with `--features provider-{feature_suffix}` \
+         (or use the default feature set)"
+    )
 }
 
 /// 把全局 [`capabilities`] 与 `providers.<p>.capabilities` 合并，再投影成
@@ -303,6 +373,7 @@ fn model_info_from_id(id: String) -> ModelInfo {
     }
 }
 
+#[cfg(feature = "provider-openai")]
 fn build_litellm_provider(
     provider: ProviderConfigFile,
     http_config: defect_http::HttpStackConfig,
@@ -315,6 +386,7 @@ fn build_litellm_provider(
     build_openai_provider("litellm", LITELLM_DISPLAY_NAME, provider, http_config)
 }
 
+#[cfg(feature = "provider-bedrock")]
 async fn build_bedrock_provider(
     vendor: &str,
     provider: ProviderConfigFile,
@@ -338,6 +410,7 @@ async fn build_bedrock_provider(
     Ok(Arc::new(provider) as Arc<dyn LlmProvider>)
 }
 
+#[cfg(feature = "provider-openai")]
 fn build_openai_provider(
     vendor: &str,
     display_name: &str,
@@ -368,11 +441,13 @@ fn build_openai_provider(
 /// 给 OpenAI-兼容 provider 填默认 base_url / api_key_env。
 ///
 /// `pub(crate)` 暴露给 unit test——LiteLLM 装配走这条路径。
+#[cfg(feature = "provider-openai")]
 pub(crate) struct ProviderDefaults {
     pub(crate) base_url: &'static str,
     pub(crate) api_key_env: &'static str,
 }
 
+#[cfg(feature = "provider-openai")]
 impl ProviderDefaults {
     pub(crate) fn apply(self, mut provider: ProviderConfigFile) -> ProviderConfigFile {
         provider
@@ -385,6 +460,7 @@ impl ProviderDefaults {
     }
 }
 
+#[cfg(feature = "provider-openai")]
 fn provider_headers(
     headers: BTreeMap<String, String>,
 ) -> anyhow::Result<HashMap<HeaderName, HeaderValue>> {
@@ -399,6 +475,7 @@ fn provider_headers(
     Ok(parsed)
 }
 
+#[cfg(any(feature = "provider-openai", feature = "provider-deepseek"))]
 pub(crate) fn map_reasoning_effort(value: ConfigReasoningEffort) -> LlmReasoningEffort {
     match value {
         ConfigReasoningEffort::None => LlmReasoningEffort::None,

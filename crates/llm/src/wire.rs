@@ -8,5 +8,7 @@
 //! cargo run -p defect-llm-codegen -- openai
 //! ```
 
+#[cfg(any(feature = "provider-anthropic", feature = "provider-bedrock"))]
 pub mod anthropic;
+#[cfg(any(feature = "provider-openai", feature = "provider-deepseek"))]
 pub mod openai;

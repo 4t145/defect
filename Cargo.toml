@@ -27,7 +27,9 @@ license = "MIT OR Apache-2.0"
 # 内部 crate 互相引用
 defect-agent = { path = "crates/agent" }
 defect-http = { path = "crates/http" }
-defect-llm = { path = "crates/llm" }
+# default-features = false：provider 由 defect-cli 的 provider-* feature 显式转发，
+# 让 `--no-default-features --features provider-anthropic` 能裁到单家。
+defect-llm = { path = "crates/llm", default-features = false }
 defect-tools = { path = "crates/tools" }
 defect-mcp = { path = "crates/mcp" }
 defect-sandbox = { path = "crates/sandbox" }

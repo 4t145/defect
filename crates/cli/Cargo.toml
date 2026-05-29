@@ -23,6 +23,18 @@ path = "src/bin/mcp_streamable_http_test_server.rs"
 required-features = ["__test-servers"]
 
 [features]
+# 默认全开所有 provider（与裁剪前行为一致）。按厂商裁剪二进制：
+# `cargo build --no-default-features --features provider-anthropic`。
+# echo provider 在 defect-acp，零额外依赖，永不 gate（兜底）；
+# litellm 复用 openai provider 实现，跟随 provider-openai。
+default = ["provider-anthropic", "provider-bedrock", "provider-openai", "provider-deepseek"]
+
+# 转发给 defect-llm 的同名 feature。
+provider-anthropic = ["defect-llm/provider-anthropic"]
+provider-bedrock = ["defect-llm/provider-bedrock"]
+provider-openai = ["defect-llm/provider-openai"]
+provider-deepseek = ["defect-llm/provider-deepseek"]
+
 # 仅给集成测试用：拉起内嵌 MCP server 校验 client/transport round-trip。
 # 主 release bin 不需要——开启后会拖入 rmcp 的完整 server side（schema 派生 +
 # transport-streamable-http-server）以及 axum，二进制至少 +400KB .text。

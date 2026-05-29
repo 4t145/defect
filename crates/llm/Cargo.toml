@@ -14,10 +14,12 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-aws-config.workspace = true
-aws-sdk-bedrockruntime.workspace = true
-aws-smithy-runtime-api.workspace = true
-aws-smithy-types.workspace = true
+# AWS 栈仅 provider-bedrock 用——整套 ~4.8MiB（含 aws-lc-sys 的 C/汇编 crypto），
+# 设为 optional 由 feature 拉，关掉 bedrock 时整条 AWS 依赖从二进制消失。
+aws-config = { workspace = true, optional = true }
+aws-sdk-bedrockruntime = { workspace = true, optional = true }
+aws-smithy-runtime-api = { workspace = true, optional = true }
+aws-smithy-types = { workspace = true, optional = true }
 
 # LLM 客户端栈：toac codegen 出的 wire/* + hyper transport
 toac.workspace = true
@@ -28,6 +30,27 @@ http-body-util.workspace = true
 bytes.workspace = true
 hyper.workspace = true
 tower.workspace = true
+
+[features]
+# 默认全开。按厂商裁剪：`--no-default-features --features provider-anthropic` 等。
+default = ["provider-anthropic", "provider-bedrock", "provider-openai", "provider-deepseek"]
+
+# 每家 provider 一个 feature，gate 对应 provider/ 子模块及其独占的 protocol/wire。
+# 共享模块由"或"关系的多个 feature 任一开启即编入（见 protocol.rs / wire.rs 的 cfg）：
+#   - anthropic_messages / wire::anthropic  ← anthropic | bedrock
+#   - openai_chat / wire::openai            ← openai | deepseek
+provider-anthropic = []
+# bedrock 复用 anthropic 的 protocol/wire，并独占整个 AWS 栈。
+provider-bedrock = [
+    "provider-anthropic",
+    "dep:aws-config",
+    "dep:aws-sdk-bedrockruntime",
+    "dep:aws-smithy-runtime-api",
+    "dep:aws-smithy-types",
+]
+provider-openai = []
+# deepseek 复用 openai 的 protocol/wire（deepseek_chat 依赖 openai_chat）。
+provider-deepseek = ["provider-openai"]
 
 [dev-dependencies]
 agent-client-protocol.workspace = true

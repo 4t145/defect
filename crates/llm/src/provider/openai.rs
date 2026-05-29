@@ -174,6 +174,8 @@ impl OpenAiProvider {
         })
     }
 
+    // 仅 deepseek provider 复用底层 client；openai 单独编译时无调用点。
+    #[cfg(feature = "provider-deepseek")]
     pub(crate) fn client(&self) -> Client {
         self.client.clone()
     }
