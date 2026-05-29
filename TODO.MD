@@ -28,7 +28,7 @@
 | internal | Turn 主循环（LLM 调用 ↔ 工具执行编排）                         | `docs/internal/turn-loop.md`                                            | P0     | ✅ 已完成 |
 | internal | 错误类型分层（agent / provider / tool / sandbox）              | `docs/internal/errors.md`                                               | P0     | ✅ 已完成 |
 | internal | LLM thinking 多轮 round-trip（reasoning_content 回放）         | `docs/internal/thinking-roundtrip.md`                                   | P0     | ✅ 已完成 |
-| internal | 配置加载与合并（用户/项目/CLI 覆盖）                           | `docs/internal/config.md`                                               | P1     | 🚧 进行中 |
+| internal | 配置加载与合并（用户/项目/CLI 覆盖）                           | `docs/internal/config.md`                                               | P1     | ✅ 已完成 |
 | internal | System prompt 组装（`base_prompt` / `prompt` / `AGENTS.md` / session overlay） | `docs/internal/config.md`                                               | P1     | ✅ 已完成 |
 | internal | 入口配置接入默认 MCP servers（`mcp.enabled_servers` / `mcp.servers.*`） | `docs/internal/config.md`                                               | P1     | ✅ 已完成 |
 | internal | 沙箱策略决策器（read-only / auto / full + 路径白名单）         | `docs/internal/sandbox-policy.md`                                       | P0     | ✅ 已完成 |
@@ -37,7 +37,7 @@
 | internal | 内置工具：fetch（HTTP GET + html→markdown 渲染）               | `docs/internal/tools-fetch.md`                                          | P1     | ✅ 已完成 |
 | internal | 内置工具：grep / glob 检索（统一 `search` tool）               | `docs/internal/tools-search.md`                                         | P1     | ✅ 已完成 |
 | internal | 会话持久化（jsonl，append-only，可 resume）                    | `docs/internal/storage-jsonl.md`                                        | P1     | ✅ 已完成 |
-| internal | Hook 系统（5 件套生命周期 + Builtin/Command/Prompt handler）   | `docs/internal/hooks.md`                                                | P1     | 🕒 未开始 |
+| internal | Hook 系统（生命周期事件 + Builtin/Command/Prompt handler）     | `docs/internal/hooks.md`                                                | P1     | ✅ 已完成 |
 | outbound | LLM 模块两层架构（协议层 + 厂商层）总览                        | `docs/outbound/llm.md`                                                  | P0     | ✅ 已完成 |
 | outbound | Anthropic provider（messages API + 流式）                      | `docs/outbound/llm-anthropic.md`                                        | P0     | ✅ 已完成 |
 | outbound | OpenAI 兼容 provider（chat completions + 流式）                | `docs/outbound/llm-openai.md`                                           | P0     | ✅ 已完成 |
@@ -56,7 +56,7 @@
 | inbound  | ACP 文件系统委托（通过客户端读写）                             | `docs/inbound/acp-fs.md`                                                | P1     | ✅ 已完成 |
 | inbound  | ACP shell 委托（通过客户端跑终端命令）                         | `docs/inbound/acp-shell.md`                                             | P2     | ✅ 已完成 |
 | inbound  | ACP 取消/中断（cancel turn 边界 case）                         | `docs/inbound/acp-cancel.md`                                            | P1     | ✅ 已完成 |
-| inbound  | ACP 暴露 session 模型候选并支持 `session/set_model`            | `docs/inbound/acp-session.md`                                           | P1     | 🚧 进行中 |
+| inbound  | ACP 暴露 session 模型候选并支持 `session/set_model`            | `docs/inbound/acp-session.md`                                           | P1     | ✅ 已完成 |
 | 基础     | CLI 入口（参数解析、组装、跑 ACP server）                      | `docs/cli.md`                                                           | P0     | ✅ 已完成 |
 | 基础     | 端到端冒烟用例（CLI ←→ 假 ACP client ←→ 假 LLM）               | `docs/testing/e2e.md`                                                   | P1     | ✅ 已完成 |
 | 基础     | CLI MCP 冒烟用例（真实 defect 二进制 + 假 OpenAI + stdio MCP） | `docs/testing/e2e.md`                                                   | P1     | ✅ 已完成 |
@@ -75,7 +75,6 @@
 | internal | Skill 加载机制（glob 条件匹配 + always 的 markdown skill 注入到 system prompt，附 `skill` 工具供模型按需加载） | `docs/internal/skills.md` | 🕒 未开始 |
 | internal | LSP 语义理解（诊断注入、跳转定义、查找引用；P1 可用 hook 跑 linter 过渡） | `docs/internal/lsp.md` | 🕒 未开始 |
 | internal | Checkpoint / Undo（工具执行前自动快照，支持回滚；可复用 git stash 或文件级快照） | `docs/internal/checkpoint.md` | 🕒 未开始 |
-| internal | 配置 key 校验去重（`is_known_config_key` 手维护 100+ 行字面量白名单，与 `XxxSection` struct 是两份真相源，每加字段要改多处、漏抄会静默误报 UnknownKey；倾向 serde `deny_unknown_fields` 根治，不喜欢的配置我直接报错） | `docs/internal/config.md` §11.1 | ✅ 已完成 |
 
 ---
 
