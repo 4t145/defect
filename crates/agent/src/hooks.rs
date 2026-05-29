@@ -40,6 +40,8 @@ use crate::llm::Usage;
 use crate::tool::SafetyClass;
 
 pub mod builtin;
+pub mod command;
+pub mod prompt;
 
 /// `DefaultHookEngine` 的默认 per-handler 超时（hooks.md §8）。
 const DEFAULT_HANDLER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -169,6 +171,25 @@ impl HookEvent<'_> {
             Self::PreCompact { .. } => HookEventKind::PreCompact,
             Self::PostCompact { .. } => HookEventKind::PostCompact,
             Self::PermissionAsk { .. } => HookEventKind::PermissionAsk,
+        }
+    }
+
+    /// 事件名 snake_case——env 注入 / stdin envelope / 模板渲染共用。
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            Self::SessionStart { .. } => "session_start",
+            Self::UserPromptSubmit { .. } => "user_prompt_submit",
+            Self::PreToolUse { .. } => "pre_tool_use",
+            Self::PostToolUse { .. } => "post_tool_use",
+            Self::PostToolUseFailure { .. } => "post_tool_use_failure",
+            Self::SessionEnd { .. } => "session_end",
+            Self::TurnStart { .. } => "turn_start",
+            Self::TurnEnd { .. } => "turn_end",
+            Self::PreLlmCall { .. } => "pre_llm_call",
+            Self::PostLlmCall { .. } => "post_llm_call",
+            Self::PreCompact { .. } => "pre_compact",
+            Self::PostCompact { .. } => "post_compact",
+            Self::PermissionAsk { .. } => "permission_ask",
         }
     }
 

@@ -3,76 +3,69 @@
 //! 详见 `docs/internal/hooks.md` §5.3 / §10——agent crate 不依赖 config，
 //! 翻译动作放 CLI 装配期；这里也是 fail-fast 报"未知 builtin 名"的位置。
 //!
-//! v0 仅支持 `HookHandlerSpec::Builtin`；`Command` / `Prompt` 走
-//! [`HookError::Configuration`] 占位，真正的子进程 / LLM handler 实现
-//! 留在 hooks Phase E / F。
+//! 三种 handler 形态在 v0 全部接通：
+//! - `Builtin { name }` → 按名查 [`BuiltinRegistry`]，未知 name 走
+//!   [`HookEngineBuildError::UnknownBuiltin`] fail-fast
+//! - `Command(_)` → [`CommandHandler::new`]（argv 直 spawn / 显式 shell 二选一）
+//! - `Prompt(_)` → [`PromptHandler::new`]，CLI 装配期把当前 default
+//!   provider/model 喂进去（`HookPromptSpec.model = None` 时回退到 session
+//!   默认 model）
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use defect_agent::hooks::builtin::BuiltinRegistry;
+use defect_agent::hooks::command::{CommandHandler, CommandSpec, ShellKind as AgentShellKind};
+use defect_agent::hooks::prompt::{PromptHandler, PromptRender as AgentPromptRender, PromptSpec};
 use defect_agent::hooks::{
-    DefaultHookEngine, HandlerEntry, HandlerTable, HookEventKind, HookMatcher as AgentHookMatcher,
+    DefaultHookEngine, HandlerEntry, HandlerTable, HookEventKind, HookHandler,
+    HookMatcher as AgentHookMatcher,
 };
+use defect_agent::llm::{LlmProvider, ProviderRegistry};
 use defect_config::{
-    HookCommandSpec, HookEntry, HookHandlerSpec, HookMatcher as ConfigHookMatcher, HooksConfig,
+    HookCommandSpec, HookEntry, HookHandlerSpec, HookMatcher as ConfigHookMatcher,
+    HookPromptRender, HookPromptSpec, HookShellKind, HooksConfig,
 };
 
-/// 装配错误：v0 阶段大多是"配置引用了未实现的 handler 形态"或"builtin name
-/// 拼错"。CLI 入口直接 `anyhow::bail!` 即可。
+/// 装配错误。
+///
+/// `Configuration` 兜底仅出现在配置层未捕获的非法组合（理论上 config
+/// loader 已经 fail-fast 过一轮）。
 #[derive(Debug, thiserror::Error)]
 pub enum HookEngineBuildError {
     #[error("unknown builtin hook handler `{name}` (available: {available})")]
     UnknownBuiltin { name: String, available: String },
 
-    #[error("hook handler form `{form}` is not yet implemented (Phase E/F)")]
-    Unimplemented { form: &'static str },
+    #[error("hook configuration invalid: {0}")]
+    Configuration(String),
+}
+
+/// 装配 hook engine 时还需要的运行期上下文。
+///
+/// `Prompt` handler 要 LLM provider；`registry` 提供"按 model id 选 provider"
+/// 与"如果 hook 没指定 model 用哪个 fallback"。
+pub struct HookEngineCtx<'a> {
+    pub registry: &'a Arc<ProviderRegistry>,
+    pub default_model: &'a str,
 }
 
 /// 用 `[hooks]` 段 + builtin 注册表构造一个 [`DefaultHookEngine`]。
-///
-/// - 空 `HooksConfig` → 返回空 engine（caller 可以选择直接走 `NoopHookEngine`）
-/// - `Builtin { name }` → registry.lookup；找不到时 fail-fast，避免用户在 turn
-///   跑到一半才发现拼错（hooks.md §4.1）
-/// - `Command(_)` / `Prompt(_)` → 返回 [`HookEngineBuildError::Unimplemented`]，
-///   让 CLI 在启动期报错而不是默默 noop——后者会让"我配了个 hook 但它没生效"
-///   的状态变成隐藏 bug
 pub fn build_hook_engine(
     hooks: &HooksConfig,
     builtins: &BuiltinRegistry,
+    rt: &HookEngineCtx<'_>,
 ) -> Result<DefaultHookEngine, HookEngineBuildError> {
     let mut table = HandlerTable::empty();
 
-    push_bucket(
-        &mut table,
-        HookEventKind::SessionStart,
-        &hooks.session_start,
-        builtins,
-    )?;
-    push_bucket(
-        &mut table,
-        HookEventKind::UserPromptSubmit,
-        &hooks.user_prompt_submit,
-        builtins,
-    )?;
-    push_bucket(
-        &mut table,
-        HookEventKind::PreToolUse,
-        &hooks.pre_tool_use,
-        builtins,
-    )?;
-    push_bucket(
-        &mut table,
-        HookEventKind::PostToolUse,
-        &hooks.post_tool_use,
-        builtins,
-    )?;
-    push_bucket(
-        &mut table,
-        HookEventKind::PostToolUseFailure,
-        &hooks.post_tool_use_failure,
-        builtins,
-    )?;
+    for (kind, entries) in [
+        (HookEventKind::SessionStart, &hooks.session_start),
+        (HookEventKind::UserPromptSubmit, &hooks.user_prompt_submit),
+        (HookEventKind::PreToolUse, &hooks.pre_tool_use),
+        (HookEventKind::PostToolUse, &hooks.post_tool_use),
+        (HookEventKind::PostToolUseFailure, &hooks.post_tool_use_failure),
+    ] {
+        push_bucket(&mut table, kind, entries, builtins, rt)?;
+    }
 
     let engine = DefaultHookEngine::new();
     engine.reload(table);
@@ -84,36 +77,11 @@ fn push_bucket(
     kind: HookEventKind,
     entries: &[HookEntry],
     builtins: &BuiltinRegistry,
+    rt: &HookEngineCtx<'_>,
 ) -> Result<(), HookEngineBuildError> {
     for entry in entries {
         let matcher = translate_matcher(&entry.matcher);
-        let (handler, timeout) = match &entry.handler {
-            HookHandlerSpec::Builtin { name } => {
-                let handler = builtins.lookup(name).ok_or_else(|| {
-                    let available = builtins.names().collect::<Vec<_>>().join(", ");
-                    HookEngineBuildError::UnknownBuiltin {
-                        name: name.clone(),
-                        available,
-                    }
-                })?;
-                (handler, None)
-            }
-            HookHandlerSpec::Command(spec) => {
-                let _timeout = command_timeout(spec);
-                return Err(HookEngineBuildError::Unimplemented { form: "command" });
-            }
-            HookHandlerSpec::Prompt(_spec) => {
-                return Err(HookEngineBuildError::Unimplemented { form: "prompt" });
-            }
-            // `HookHandlerSpec` 是 non_exhaustive 的；CLI 装配阶段不认识的形态
-            // 直接 fail-fast，避免新增 handler 类型后默默 noop。
-            other => {
-                let _ = other;
-                return Err(HookEngineBuildError::Unimplemented {
-                    form: "<unrecognized>",
-                });
-            }
-        };
+        let (handler, timeout) = build_handler(&entry.handler, builtins, rt)?;
         let mut hook = HandlerEntry::new(matcher, handler);
         if let Some(t) = timeout {
             hook = hook.with_timeout(t);
@@ -121,6 +89,59 @@ fn push_bucket(
         table.push(kind, hook);
     }
     Ok(())
+}
+
+fn build_handler(
+    spec: &HookHandlerSpec,
+    builtins: &BuiltinRegistry,
+    rt: &HookEngineCtx<'_>,
+) -> Result<(Arc<dyn HookHandler>, Option<Duration>), HookEngineBuildError> {
+    match spec {
+        HookHandlerSpec::Builtin { name } => {
+            let handler = builtins.lookup(name).ok_or_else(|| {
+                let available = builtins.names().collect::<Vec<_>>().join(", ");
+                HookEngineBuildError::UnknownBuiltin {
+                    name: name.clone(),
+                    available,
+                }
+            })?;
+            Ok((handler, None))
+        }
+        HookHandlerSpec::Command(cmd) => {
+            let agent_spec = translate_command(cmd);
+            let handler = CommandHandler::new(agent_spec);
+            let timeout = handler.timeout();
+            Ok((Arc::new(handler) as Arc<dyn HookHandler>, timeout))
+        }
+        HookHandlerSpec::Prompt(prompt) => {
+            let provider = resolve_prompt_provider(prompt, rt)?;
+            let agent_spec = translate_prompt(prompt, provider, rt.default_model.to_string());
+            let handler = PromptHandler::new(agent_spec);
+            let timeout = handler.timeout();
+            Ok((Arc::new(handler) as Arc<dyn HookHandler>, timeout))
+        }
+        // `HookHandlerSpec` 是 non_exhaustive 的——出现新形态时强制 CLI 显式
+        // 加一条分支，避免默默 noop。
+        other => Err(HookEngineBuildError::Configuration(format!(
+            "unrecognized hook handler form: {other:?}"
+        ))),
+    }
+}
+
+fn resolve_prompt_provider(
+    spec: &HookPromptSpec,
+    rt: &HookEngineCtx<'_>,
+) -> Result<Arc<dyn LlmProvider>, HookEngineBuildError> {
+    let model_id = spec.model.as_deref().unwrap_or(rt.default_model);
+    let entry = rt
+        .registry
+        .entry_for_model(model_id)
+        .ok_or_else(|| {
+            HookEngineBuildError::Configuration(format!(
+                "prompt hook references unknown model `{model_id}` (no provider registered for it)"
+            ))
+        })?;
+    Ok(Arc::clone(entry.provider()))
 }
 
 fn translate_matcher(m: &ConfigHookMatcher) -> AgentHookMatcher {
@@ -131,16 +152,89 @@ fn translate_matcher(m: &ConfigHookMatcher) -> AgentHookMatcher {
     out
 }
 
-/// 留给后续 Phase E：从 `HookCommandSpec` 上抽 `timeout_sec` 字段。
-fn command_timeout(spec: &HookCommandSpec) -> Option<Duration> {
-    let secs = match spec {
-        HookCommandSpec::Argv { timeout_sec, .. } | HookCommandSpec::Shell { timeout_sec, .. } => {
-            *timeout_sec
+fn translate_command(spec: &HookCommandSpec) -> CommandSpec {
+    match spec {
+        HookCommandSpec::Argv {
+            argv,
+            argv_windows,
+            cwd,
+            env,
+            timeout_sec,
+        } => CommandSpec::Argv {
+            argv: argv.clone(),
+            argv_windows: argv_windows.clone(),
+            cwd: cwd.clone(),
+            env: env.clone(),
+            timeout_sec: *timeout_sec,
+        },
+        HookCommandSpec::Shell {
+            shell,
+            command,
+            cwd,
+            env,
+            timeout_sec,
+        } => CommandSpec::Shell {
+            shell: translate_shell(shell),
+            command: command.clone(),
+            cwd: cwd.clone(),
+            env: env.clone(),
+            timeout_sec: *timeout_sec,
+        },
+        // non_exhaustive 兜底——遇到新形态保守翻成空 argv 让 agent 层报错。
+        other => {
+            let _ = other;
+            CommandSpec::Argv {
+                argv: Vec::new(),
+                argv_windows: None,
+                cwd: None,
+                env: Default::default(),
+                timeout_sec: None,
+            }
         }
-        // non_exhaustive: 未知形态保守不带 timeout，由引擎默认值兜底。
-        _ => None,
-    };
-    secs.map(Duration::from_secs)
+    }
+}
+
+fn translate_shell(shell: &HookShellKind) -> AgentShellKind {
+    match shell {
+        HookShellKind::Sh => AgentShellKind::Sh,
+        HookShellKind::Bash => AgentShellKind::Bash,
+        HookShellKind::Pwsh => AgentShellKind::Pwsh,
+        HookShellKind::Cmd => AgentShellKind::Cmd,
+        HookShellKind::Custom { program, args } => AgentShellKind::Custom {
+            program: program.clone(),
+            args: args.clone(),
+        },
+        // non_exhaustive 兜底
+        other => {
+            let _ = other;
+            AgentShellKind::Sh
+        }
+    }
+}
+
+fn translate_prompt(
+    spec: &HookPromptSpec,
+    provider: Arc<dyn LlmProvider>,
+    fallback_model: String,
+) -> PromptSpec {
+    PromptSpec {
+        provider,
+        model: spec.model.clone(),
+        fallback_model,
+        system: spec.system.clone(),
+        render: match &spec.render {
+            HookPromptRender::Json => AgentPromptRender::Json,
+            HookPromptRender::Template { template } => AgentPromptRender::Template {
+                template: template.clone(),
+            },
+            other => {
+                // non_exhaustive 兜底——按 Json 兜底。
+                let _ = other;
+                AgentPromptRender::Json
+            }
+        },
+        timeout_sec: spec.timeout_sec,
+    }
 }
 
 /// 在 [`Arc`] 里封装一份 hook engine——session/turn 主循环统一拿
@@ -149,37 +243,107 @@ fn command_timeout(spec: &HookCommandSpec) -> Option<Duration> {
 pub fn build_engine_arc(
     hooks: &HooksConfig,
     builtins: &BuiltinRegistry,
+    rt: &HookEngineCtx<'_>,
 ) -> Result<Arc<dyn defect_agent::hooks::HookEngine>, HookEngineBuildError> {
     if hooks.is_empty() {
         return Ok(Arc::new(defect_agent::hooks::NoopHookEngine));
     }
-    let engine = build_hook_engine(hooks, builtins)?;
+    let engine = build_hook_engine(hooks, builtins, rt)?;
     Ok(Arc::new(engine))
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use defect_agent::llm::{
+        Capabilities, FeatureSupport, LlmProvider, ModelInfo, ProtocolId, ProviderEntry,
+        ProviderInfo, ProviderRegistry, ProviderStream, ThinkingEcho,
+    };
+    use defect_agent::session::SessionCapabilitiesConfig;
     use defect_agent::tool::SafetyClass;
     use defect_config::ConfigSource;
+    use futures::future::BoxFuture;
+    use std::collections::BTreeMap;
+    use tokio_util::sync::CancellationToken;
+
+    struct StubProvider;
+    impl LlmProvider for StubProvider {
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                vendor: "stub".into(),
+                protocol: ProtocolId::OpenAiChat,
+                display_name: "stub".into(),
+            }
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                tool_calls: FeatureSupport::Unsupported,
+                parallel_tool_calls: FeatureSupport::Unsupported,
+                thinking: FeatureSupport::Unsupported,
+                vision: FeatureSupport::Unsupported,
+                prompt_cache: FeatureSupport::Unsupported,
+                thinking_echo: ThinkingEcho::Forbidden,
+            }
+        }
+        fn list_models(
+            &self,
+        ) -> BoxFuture<'_, Result<Vec<ModelInfo>, defect_agent::llm::ProviderError>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+        fn model_info(&self, _id: &str) -> Option<ModelInfo> {
+            None
+        }
+        fn complete(
+            &self,
+            _req: defect_agent::llm::CompletionRequest,
+            _cancel: CancellationToken,
+        ) -> BoxFuture<'_, Result<ProviderStream, defect_agent::llm::ProviderError>> {
+            unreachable!()
+        }
+    }
+
+    fn stub_registry() -> Arc<ProviderRegistry> {
+        let model = ModelInfo {
+            id: "stub-1".into(),
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            deprecated: false,
+            capabilities_overrides: Default::default(),
+        };
+        Arc::new(
+            ProviderRegistry::new(
+                vec![ProviderEntry::new(
+                    Arc::new(StubProvider),
+                    vec![model],
+                    SessionCapabilitiesConfig::default(),
+                )],
+                "stub-1",
+            )
+            .expect("registry"),
+        )
+    }
+
+    fn ctx<'a>(reg: &'a Arc<ProviderRegistry>) -> HookEngineCtx<'a> {
+        HookEngineCtx {
+            registry: reg,
+            default_model: "stub-1",
+        }
+    }
 
     #[test]
     fn empty_config_yields_noop_engine() {
         let builtins = BuiltinRegistry::defaults();
-        let arc = build_engine_arc(&HooksConfig::default(), &builtins).expect("ok");
-        // 不能直接断言类型，但断言 fire 返回 Pass 即可
+        let reg = stub_registry();
+        let arc = build_engine_arc(&HooksConfig::default(), &builtins, &ctx(&reg)).expect("ok");
         let session_id = agent_client_protocol::schema::SessionId::new("s");
         let cwd = std::path::Path::new("/");
-        let ctx = defect_agent::hooks::HookCtx::new(
-            &session_id,
-            cwd,
-            tokio_util::sync::CancellationToken::new(),
-        );
+        let hctx = defect_agent::hooks::HookCtx::new(&session_id, cwd, CancellationToken::new());
         let ev = defect_agent::hooks::HookEvent::SessionStart {
             source: defect_agent::hooks::SessionSource::New,
             cwd,
         };
-        let outcome = futures::executor::block_on(arc.fire(ev, ctx));
+        let outcome = futures::executor::block_on(arc.fire(ev, hctx));
         assert!(outcome.block.is_none());
         assert!(outcome.append.is_empty());
     }
@@ -187,6 +351,7 @@ mod test {
     #[test]
     fn unknown_builtin_fails_fast() {
         let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
         let mut hooks = HooksConfig::default();
         hooks.session_start.push(HookEntry {
             matcher: ConfigHookMatcher::default(),
@@ -195,7 +360,7 @@ mod test {
             },
             source: ConfigSource::User,
         });
-        let err = match build_engine_arc(&hooks, &builtins) {
+        let err = match build_engine_arc(&hooks, &builtins, &ctx(&reg)) {
             Ok(_) => panic!("should fail"),
             Err(e) => e,
         };
@@ -208,6 +373,7 @@ mod test {
     #[test]
     fn known_builtin_loads() {
         let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
         let mut hooks = HooksConfig::default();
         hooks.pre_tool_use.push(HookEntry {
             matcher: ConfigHookMatcher {
@@ -219,13 +385,13 @@ mod test {
             },
             source: ConfigSource::Project,
         });
-        let _arc = build_engine_arc(&hooks, &builtins).expect("ok");
+        let _arc = build_engine_arc(&hooks, &builtins, &ctx(&reg)).expect("ok");
     }
 
     #[test]
-    fn command_handler_unimplemented() {
-        use std::collections::BTreeMap;
+    fn command_handler_argv_loads() {
         let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
         let mut hooks = HooksConfig::default();
         hooks.pre_tool_use.push(HookEntry {
             matcher: ConfigHookMatcher::default(),
@@ -238,14 +404,66 @@ mod test {
             }),
             source: ConfigSource::User,
         });
-        let err = match build_engine_arc(&hooks, &builtins) {
+        let _arc = build_engine_arc(&hooks, &builtins, &ctx(&reg)).expect("ok");
+    }
+
+    #[test]
+    fn command_handler_shell_loads() {
+        let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
+        let mut hooks = HooksConfig::default();
+        hooks.pre_tool_use.push(HookEntry {
+            matcher: ConfigHookMatcher::default(),
+            handler: HookHandlerSpec::Command(HookCommandSpec::Shell {
+                shell: HookShellKind::Bash,
+                command: "echo hi".into(),
+                cwd: None,
+                env: BTreeMap::new(),
+                timeout_sec: Some(5),
+            }),
+            source: ConfigSource::User,
+        });
+        let _arc = build_engine_arc(&hooks, &builtins, &ctx(&reg)).expect("ok");
+    }
+
+    #[test]
+    fn prompt_handler_loads_with_default_model() {
+        let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
+        let mut hooks = HooksConfig::default();
+        hooks.session_start.push(HookEntry {
+            matcher: ConfigHookMatcher::default(),
+            handler: HookHandlerSpec::Prompt(HookPromptSpec::new(
+                None,
+                "summarize".into(),
+                HookPromptRender::Json,
+                Some(5),
+            )),
+            source: ConfigSource::User,
+        });
+        let _arc = build_engine_arc(&hooks, &builtins, &ctx(&reg)).expect("ok");
+    }
+
+    #[test]
+    fn prompt_handler_unknown_model_fails() {
+        let builtins = BuiltinRegistry::defaults();
+        let reg = stub_registry();
+        let mut hooks = HooksConfig::default();
+        hooks.session_start.push(HookEntry {
+            matcher: ConfigHookMatcher::default(),
+            handler: HookHandlerSpec::Prompt(HookPromptSpec::new(
+                Some("not-registered".into()),
+                "x".into(),
+                HookPromptRender::Json,
+                None,
+            )),
+            source: ConfigSource::User,
+        });
+        let err = match build_engine_arc(&hooks, &builtins, &ctx(&reg)) {
             Ok(_) => panic!("should fail"),
             Err(e) => e,
         };
-        assert!(matches!(
-            err,
-            HookEngineBuildError::Unimplemented { form: "command" }
-        ));
+        assert!(matches!(err, HookEngineBuildError::Configuration(_)));
     }
 
     #[test]

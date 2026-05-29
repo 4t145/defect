@@ -754,14 +754,16 @@ impl HookHandler for SkillRouterHook {
 4. ✓ `TurnRunner` 接入 UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure 四个 await 点
 5. ✓ Builtin handler：`tracing-audit`、`redact-secrets` 各一个（`crates/agent/src/hooks/builtin.rs`）
 6. ✓ CLI 装配：`crates/cli/src/hooks.rs` 把 `HooksConfig` 翻成 `DefaultHookEngine`，未知 builtin 名 fail-fast；空配置走 `NoopHookEngine`
-7. Command handler：`Argv` 形态先；`Shell` 形态做 `ShellKind::Sh`（v0 占位 `Configuration` 错误，待 Phase E）
-8. Prompt handler：依赖 `LlmProvider`，落地放最后（v0 占位 `Configuration` 错误，待 Phase F）
+7. ✓ Command handler：argv 直 spawn / 显式 shell（`Sh` / `Bash` / `Pwsh` / `Cmd` / `Custom`）二选一；stdin/stdout JSON、env 注入按 §4.2；CLI 装配翻译 `HookCommandSpec` → `crate::hooks::command::CommandSpec`；`kill_on_drop(true)` + `ctx.cancel` 触发回 `HookError::Timeout`
+8. ✓ Prompt handler：`{{key}}` 极简模板（不引入 handlebars/tera 这类重型依赖）；CLI 装配按 `HookPromptSpec.model` 或 session 默认 model 从 `ProviderRegistry` 解析 provider；不进 turn 主循环 LLM 调用计数（不计入 `max_turn_requests`）；`SessionStart` 上失败按 §3.5 降级 warning
 9. CLI：`defect hooks list / trust / revoke`（依赖 §6 trust 注册表落地）
 10. e2e：mock provider + scripted hook 配置走 5 件套各一遍
 
 测试策略：复用 [`docs/testing/e2e.md`](../testing/e2e.md) 的 mock 框架；hook engine 单测用 mock handler 验合并规则与 pipeline 顺序。
 
-当前 unit 覆盖：
+当前 unit 覆盖（53 测）：
 - `crates/agent/src/hooks.rs` — pipeline / matcher / glob / 超时 / panic 降级（16 测）
 - `crates/agent/src/hooks/builtin.rs` — registry + 两个 builtin（7 测）
-- `crates/cli/src/hooks.rs` — config → engine 翻译 + fail-fast（5 测）
+- `crates/agent/src/hooks/command.rs` — argv / shell / stdin envelope / stdout 解析 / 取消 / 非零退出（14 测，依赖 `/bin/sh`）
+- `crates/agent/src/hooks/prompt.rs` — 模板渲染 / json 渲染 / fake provider 调用 + 失败传播（8 测）
+- `crates/cli/src/hooks.rs` — config → engine 翻译 + fail-fast + Command/Prompt 装配（8 测）

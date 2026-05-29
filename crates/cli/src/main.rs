@@ -95,8 +95,13 @@ async fn main() -> anyhow::Result<()> {
     let storage = Arc::new(StorageObserver::new(default_sessions_root()?));
 
     let builtin_registry = BuiltinRegistry::defaults();
-    let hook_engine = hooks::build_engine_arc(&config.effective.hooks, &builtin_registry)
-        .map_err(|e| anyhow::anyhow!("hook engine build failed: {e}"))?;
+    let hook_engine_ctx = hooks::HookEngineCtx {
+        registry: &registry,
+        default_model: turn_config.model.as_str(),
+    };
+    let hook_engine =
+        hooks::build_engine_arc(&config.effective.hooks, &builtin_registry, &hook_engine_ctx)
+            .map_err(|e| anyhow::anyhow!("hook engine build failed: {e}"))?;
 
     let agent = DefaultAgentCore::builder()
         .registry(registry)

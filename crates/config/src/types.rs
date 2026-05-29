@@ -320,6 +320,24 @@ pub struct HookPromptSpec {
     pub timeout_sec: Option<u64>,
 }
 
+impl HookPromptSpec {
+    /// 跨 crate 构造入口——`#[non_exhaustive]` 后 struct literal 不能用。
+    #[must_use]
+    pub fn new(
+        model: Option<String>,
+        system: String,
+        render: HookPromptRender,
+        timeout_sec: Option<u64>,
+    ) -> Self {
+        Self {
+            model,
+            system,
+            render,
+            timeout_sec,
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HookPromptRender {
