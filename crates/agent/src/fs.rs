@@ -104,6 +104,25 @@ pub trait FsBackend: Send + Sync {
         limit: Option<u32>,
     ) -> BoxFuture<'_, Result<String, FsError>>;
 
+    /// 读取整个文件的原始字节。`read_file` 工具在识别到图片等二进制类型时
+    /// 走这条，把字节交给上层 base64 编码成多模态 tool_result。
+    ///
+    /// 默认实现返回 [`FsError::NotPermitted`]——委托后端（[`AcpFsBackend`]）
+    /// 的 ACP `fs/read_text_file` 反向通道是纯文本的，拿不到二进制；ACP 环境
+    /// 下读图片这件事由 system prompt 引导模型回避（`# Environment` 段会注明
+    /// frontend 是 delegated）。本地后端（[`LocalFsBackend`]）重写为直接读盘。
+    ///
+    /// [`AcpFsBackend`]: defect_acp::fs::AcpFsBackend
+    /// [`LocalFsBackend`]: defect_tools::fs::LocalFsBackend
+    fn read_bytes(&self, path: PathBuf) -> BoxFuture<'_, Result<Vec<u8>, FsError>> {
+        Box::pin(async move {
+            let _ = path;
+            Err(FsError::NotPermitted(
+                "this backend cannot read raw bytes (e.g. images); delegated environments only support text reads".to_string(),
+            ))
+        })
+    }
+
     /// 全量覆盖写一个 UTF-8 文本文件。
     ///
     /// 父目录必须已存在；后端不静默 mkdir-p。

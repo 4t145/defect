@@ -24,5 +24,5 @@ pub use provider::{LlmProvider, ProviderStream};
 pub use registry::{ModelCandidate, ProviderEntry, ProviderRegistry, ProviderRegistryError};
 pub use request::{
     CompletionRequest, ImageData, Message, MessageContent, ProviderActivityKind, Role,
-    SamplingParams, ThinkingConfig, ToolChoice, ToolResultBody,
+    SamplingParams, ThinkingConfig, ToolChoice, ToolResultBody, ToolResultContent,
 };

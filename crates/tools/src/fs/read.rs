@@ -7,9 +7,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use agent_client_protocol_schema::{
-    Content, ContentBlock, TextContent, ToolCallContent, ToolCallLocation, ToolCallUpdateFields,
-    ToolKind,
+    Content, ContentBlock, ImageContent, TextContent, ToolCallContent, ToolCallLocation,
+    ToolCallUpdateFields, ToolKind,
 };
+use base64::Engine;
 use defect_agent::error::BoxError;
 use defect_agent::fs::{FsBackend, FsError};
 use defect_agent::tool::{
@@ -45,10 +46,11 @@ impl ReadFileTool {
         Self {
             schema: ToolSchema {
                 name: "read_file".to_string(),
-                description: "Read a UTF-8 text file from the workspace. \
-                              Optionally read a window starting at `offset` (1-based line) for `limit` lines. \
-                              Returns the file content with 1-based line numbers prepended. \
-                              Refuses binary files and files larger than 10 MiB."
+                description: "Read a file from the workspace. \
+                              For UTF-8 text files: optionally read a window starting at `offset` (1-based line) for `limit` lines; \
+                              returns the content with 1-based line numbers prepended. \
+                              For image files (.png/.jpg/.jpeg/.gif/.webp): returns the image itself as visual content (offset/limit ignored). \
+                              Refuses other binary files and files larger than 10 MiB."
                     .to_string(),
                 input_schema: json!({
                     "type": "object",
@@ -167,6 +169,12 @@ async fn run_read(
         Err(err) => return ToolEvent::Failed(ToolError::InvalidArgs(BoxError::new(err))),
     };
 
+    // 图片：按扩展名识别，走 read_bytes → base64 → ContentBlock::Image。
+    // offset/limit 对图片无意义，忽略。
+    if let Some(mime) = image_mime(&parsed.path) {
+        return run_read_image(parsed.path, mime, cancel, fs).await;
+    }
+
     let limit = parsed.limit.unwrap_or(default_limit).min(max_limit).max(1);
     let offset = parsed.offset.unwrap_or(1).max(1);
 
@@ -201,6 +209,66 @@ async fn run_read(
     ))]);
     fields.raw_output = Some(raw_output);
     ToolEvent::Completed(fields)
+}
+
+#[derive(Debug, Serialize)]
+struct ReadImageOutput {
+    bytes: u64,
+    mime: String,
+}
+
+/// 读图片：取原始字节 → base64 → 作为 [`ContentBlock::Image`] 返回。
+///
+/// 不做 `looks_binary` 拒绝（那条是给文本路径的）；大小上限由后端
+/// [`FsBackend::read_bytes`] 自己的阈值兜底。委托后端（ACP）的
+/// `read_bytes` 默认返回 `NotPermitted`——此时报 [`ToolError::Execution`]，
+/// 让模型从错误文本得知委托环境不支持读图片。
+async fn run_read_image(
+    path: String,
+    mime: &'static str,
+    cancel: tokio_util::sync::CancellationToken,
+    fs: Arc<dyn FsBackend>,
+) -> ToolEvent {
+    let read_fut = fs.read_bytes(PathBuf::from(&path));
+    let bytes = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return ToolEvent::Failed(ToolError::Canceled),
+        r = read_fut => match r {
+            Ok(b) => b,
+            Err(e) => return ToolEvent::Failed(map_fs_err(e)),
+        },
+    };
+
+    let byte_len = bytes.len() as u64;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    let raw_output = serde_json::to_value(ReadImageOutput {
+        bytes: byte_len,
+        mime: mime.to_string(),
+    })
+    .unwrap_or(serde_json::Value::Null);
+
+    let mut fields = ToolCallUpdateFields::default();
+    fields.content = Some(vec![ToolCallContent::Content(Content::new(
+        ContentBlock::Image(ImageContent::new(encoded, mime.to_string())),
+    ))]);
+    fields.raw_output = Some(raw_output);
+    ToolEvent::Completed(fields)
+}
+
+/// 按扩展名（大小写不敏感）映射图片 MIME。非图片返回 `None`。
+fn image_mime(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())?
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
 }
 
 fn map_fs_err(e: FsError) -> ToolError {

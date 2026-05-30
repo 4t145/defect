@@ -84,6 +84,23 @@ fn extract_text(event: &ToolEvent) -> String {
     out
 }
 
+/// 抽出 [`ContentBlock::Image`] 的 `(mime, base64-data)`。
+fn extract_image(event: &ToolEvent) -> (String, String) {
+    let fields = match event {
+        ToolEvent::Completed(f) => f,
+        _ => panic!("expected Completed, got {event:?}"),
+    };
+    let content = fields.content.as_ref().expect("content");
+    for c in content {
+        if let ToolCallContent::Content(inner) = c
+            && let ContentBlock::Image(img) = &inner.content
+        {
+            return (img.mime_type.clone(), img.data.clone());
+        }
+    }
+    panic!("no image block in {content:?}");
+}
+
 fn extract_raw(event: &ToolEvent) -> &serde_json::Value {
     let fields = match event {
         ToolEvent::Completed(f) => f,
@@ -183,6 +200,43 @@ async fn case4_read_binary_refused() {
     );
     let err_str = format!("{:?}", events[0]);
     assert!(err_str.contains("binary"), "err: {err_str}");
+}
+
+#[tokio::test]
+async fn case29_read_png_returns_image_block() {
+    use base64::Engine;
+    let h = Harness::new();
+    // 一段任意二进制（含 NUL），按文本路径会被 looks_binary 拒；走图片路径应原样回。
+    let raw_bytes: &[u8] = &[0x89, b'P', b'N', b'G', 0x00, 0x01, 0x02, 0xff];
+    h.write_file("logo.png", raw_bytes);
+    let tool = ReadFileTool::new();
+    let events = drive(tool.execute(json!({"path": "logo.png"}), h.ctx())).await;
+    assert_eq!(events.len(), 1);
+    let (mime, data) = extract_image(&events[0]);
+    assert_eq!(mime, "image/png");
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .expect("valid base64");
+    assert_eq!(decoded, raw_bytes);
+    let raw = extract_raw(&events[0]);
+    assert_eq!(raw["mime"], json!("image/png"));
+    assert_eq!(raw["bytes"], json!(raw_bytes.len()));
+}
+
+#[tokio::test]
+async fn case30_read_image_ignores_offset_limit_and_mime_by_ext() {
+    let h = Harness::new();
+    h.write_file("photo.JPEG", &[0xff, 0xd8, 0xff, 0xe0]);
+    let tool = ReadFileTool::new();
+    // offset/limit 对图片无意义，应被忽略而不报错；扩展名大小写不敏感。
+    let events = drive(tool.execute(
+        json!({"path": "photo.JPEG", "offset": 5, "limit": 1}),
+        h.ctx(),
+    ))
+    .await;
+    assert_eq!(events.len(), 1);
+    let (mime, _) = extract_image(&events[0]);
+    assert_eq!(mime, "image/jpeg");
 }
 
 #[tokio::test]

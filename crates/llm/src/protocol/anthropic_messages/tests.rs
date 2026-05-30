@@ -18,8 +18,8 @@
 //! 限制；运行期 [`decode_stream`] 走的是同一份解码核心，覆盖等价。
 
 use defect_agent::llm::{
-    CompletionRequest, Message, MessageContent, ProviderChunk, ProviderErrorKind, Role,
-    SamplingParams, StopReason, ThinkingConfig, ToolChoice, ToolResultBody,
+    CompletionRequest, ImageData, Message, MessageContent, ProviderChunk, ProviderErrorKind, Role,
+    SamplingParams, StopReason, ThinkingConfig, ToolChoice, ToolResultBody, ToolResultContent,
 };
 use defect_agent::tool::ToolSchema;
 use futures::StreamExt;
@@ -271,6 +271,62 @@ fn encode_request_tool_uses_and_results() {
         panic!("expected Tool");
     };
     assert!(tool.cache_control.is_some());
+}
+
+#[test]
+fn encode_multimodal_tool_result_emits_text_and_image_blocks() {
+    let req = CompletionRequest {
+        model: "claude-opus-4-7".into(),
+        system: None,
+        messages: vec![Message {
+            role: Role::User,
+            content: vec![MessageContent::ToolResult {
+                tool_use_id: "toolu_img".into(),
+                output: ToolResultBody::Content {
+                    blocks: vec![
+                        ToolResultContent::Text {
+                            text: "here is the screenshot".into(),
+                        },
+                        ToolResultContent::Image {
+                            mime: "image/png".into(),
+                            data: ImageData::Base64 {
+                                encoded: "AAAA".into(),
+                            },
+                        },
+                    ],
+                },
+                is_error: false,
+            }]
+            .into(),
+        }],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+    let w = encode_request(&req);
+
+    let user = match &w.messages[0].content {
+        wire::MessageParamContent::MessageParamContentVariant1(v) => v,
+        _ => panic!("expected list content"),
+    };
+    let wire::ContentBlockParam::ToolResultBlockParam(tr) = &user[0] else {
+        panic!("expected tool_result_block_param");
+    };
+    let Some(wire::ToolResultBlockParamContent102::ToolResultBlockParamContent102Variant1(blocks)) =
+        &tr.content
+    else {
+        panic!("expected list tool_result content");
+    };
+    assert_eq!(blocks.len(), 2);
+    assert!(matches!(
+        &blocks[0],
+        wire::ToolResultBlockParamContent::TextBlockParam(t) if t.text == "here is the screenshot"
+    ));
+    assert!(matches!(
+        &blocks[1],
+        wire::ToolResultBlockParamContent::ImageBlockParam(_)
+    ));
 }
 
 // ---------- thinking round-trip (signature gating) ---------------------

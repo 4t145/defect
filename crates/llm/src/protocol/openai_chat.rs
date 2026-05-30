@@ -19,7 +19,7 @@ use defect_agent::error::BoxError;
 use defect_agent::llm::{
     CompletionRequest, ImageData, Message, MessageContent, ProviderChunk, ProviderError,
     ProviderErrorKind, Role, StopReason, ThinkingConfig, ThinkingEcho, ToolChoice, ToolResultBody,
-    Usage,
+    ToolResultContent, Usage,
 };
 use defect_agent::tool::ToolSchema;
 use futures::Stream;
@@ -308,17 +308,7 @@ fn encode_user_message_into(m: &Message, out: &mut Vec<wire::ChatCompletionReque
                 );
             }
             MessageContent::Image { mime, data } => {
-                user_parts.push(
-                    wire::ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartImage(
-                        wire::ChatCompletionRequestMessageContentPartImage {
-                            r#type: wire::ChatCompletionRequestMessageContentPartImageType::ImageUrl,
-                            image_url: wire::ChatCompletionRequestMessageContentPartImageImageUrl {
-                                url: image_url_string(mime, data),
-                                detail: None,
-                            },
-                        },
-                    ),
-                );
+                user_parts.push(image_part(mime, data));
             }
             MessageContent::ToolResult {
                 tool_use_id,
@@ -328,9 +318,42 @@ fn encode_user_message_into(m: &Message, out: &mut Vec<wire::ChatCompletionReque
                 // OpenAI 的 tool message 没有 is_error 字段；用 prefix 标记，
                 // 让模型从 content 里读到错误状态。is_error 主要给 Anthropic
                 // 用的；这里保留它的语义但形态不一样。
+                //
+                // OpenAI 的 tool message 只接受文本——多模态结果里的图片塞不进
+                // tool message。编排：图片块剥出来推到 user_parts（紧随 tool
+                // message 之后的 user message），tool message 里留文本 + 一句
+                // 占位提示，让模型知道图片在下一条消息里。
                 let text = match output {
                     ToolResultBody::Text { text } => text.clone(),
                     ToolResultBody::Json { value } => value.to_string(),
+                    ToolResultBody::Content { blocks } => {
+                        let mut text = String::new();
+                        let mut image_count = 0usize;
+                        for block in blocks {
+                            match block {
+                                ToolResultContent::Text { text: t } => {
+                                    if !text.is_empty() {
+                                        text.push('\n');
+                                    }
+                                    text.push_str(t);
+                                }
+                                ToolResultContent::Image { mime, data } => {
+                                    image_count += 1;
+                                    user_parts.push(image_part(mime, data));
+                                }
+                                _ => {}
+                            }
+                        }
+                        if image_count > 0 {
+                            if !text.is_empty() {
+                                text.push('\n');
+                            }
+                            text.push_str(&format!(
+                                "[{image_count} image(s) from this tool result follow in the next user message]"
+                            ));
+                        }
+                        text
+                    }
                     _ => String::new(),
                 };
                 tool_results.push((tool_use_id.clone(), text));
@@ -465,6 +488,23 @@ fn encode_assistant_message_into(
             },
         ),
     );
+}
+
+/// 构造一个 OpenAI user message 的 image part。`MessageContent::Image` 与
+/// 多模态 tool_result 里剥出来的图片块共用这条。
+fn image_part(
+    mime: &str,
+    data: &ImageData,
+) -> wire::ChatCompletionRequestUserMessageContentPart {
+    wire::ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartImage(
+        wire::ChatCompletionRequestMessageContentPartImage {
+            r#type: wire::ChatCompletionRequestMessageContentPartImageType::ImageUrl,
+            image_url: wire::ChatCompletionRequestMessageContentPartImageImageUrl {
+                url: image_url_string(mime, data),
+                detail: None,
+            },
+        },
+    )
 }
 
 fn image_url_string(mime: &str, data: &ImageData) -> String {

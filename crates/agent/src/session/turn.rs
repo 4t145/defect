@@ -32,8 +32,8 @@ use crate::hooks::{HookCtx, HookEngine, HookEvent, HookPatch};
 use crate::http::HttpClient;
 use crate::llm::{
     CompletionRequest, HostedCapabilities, LlmProvider, Message, MessageContent, ProviderChunk,
-    ProviderStream, RetryHint, Role, SamplingParams, StopReason as LlmStopReason, ToolChoice,
-    ToolResultBody, Usage,
+    ImageData, ProviderStream, RetryHint, Role, SamplingParams, StopReason as LlmStopReason,
+    ToolChoice, ToolResultBody, ToolResultContent, Usage,
 };
 use crate::policy::{PolicyCtx, PolicyDecision, RecordedOutcome, SandboxPolicy};
 use crate::session::events::EventEmitter;
@@ -1002,11 +1002,18 @@ impl<'a> TurnRunner<'a> {
         if extra.is_empty() {
             return;
         }
-        if let ToolResultBody::Text { text } = &mut result.body {
-            if !text.is_empty() {
-                text.push('\n');
+        match &mut result.body {
+            ToolResultBody::Text { text } => {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&extra);
             }
-            text.push_str(&extra);
+            // 多模态结果：把追加文本作为新的文本块挂到末尾，不动图片块。
+            ToolResultBody::Content { blocks } => {
+                blocks.push(ToolResultContent::Text { text: extra });
+            }
+            ToolResultBody::Json { .. } => {}
         }
     }
 }
@@ -1360,16 +1367,56 @@ fn empty_stream() -> ProviderStream {
 #[cfg(test)]
 mod test;
 
-/// 把第一段文本从 [`ToolCallUpdateFields::content`] 抽出来当 tool_result。
-fn extract_text(fields: &ToolCallUpdateFields) -> Option<String> {
-    let blocks = fields.content.as_ref()?;
-    blocks.iter().find_map(|c| match c {
-        ToolCallContent::Content(inner) => match &inner.content {
-            ContentBlock::Text(t) => Some(t.text.clone()),
+/// 把 [`ToolCallUpdateFields::content`] 收成喂回 LLM 的 [`ToolResultBody`]。
+///
+/// 规则：扫描所有 `ToolCallContent::Content` 块——
+/// - 纯文本（含零图片）：拼成单条 [`ToolResultBody::Text`]，与历史行为一致，
+///   也让 `fire_post_tool_hook` 的文本追加、OpenAI tool message 走简单路径
+/// - 一旦出现图片块：升级为 [`ToolResultBody::Content`]，文本与图片块按原序
+///   混排，交给 codec 按 provider 物化
+///
+/// `Diff` / `ResourceLink` 等非文本非图片块不进 tool_result（它们是给 UI 看的
+/// ACP 展示内容，不喂模型）；返回 `None` 表示没有可喂回的内容。
+fn extract_body(fields: &ToolCallUpdateFields) -> Option<ToolResultBody> {
+    let raw = fields.content.as_ref()?;
+    let mut blocks: Vec<ToolResultContent> = Vec::new();
+    let mut has_image = false;
+    for c in raw {
+        let ToolCallContent::Content(inner) = c else {
+            continue;
+        };
+        match &inner.content {
+            ContentBlock::Text(t) => blocks.push(ToolResultContent::Text {
+                text: t.text.clone(),
+            }),
+            ContentBlock::Image(img) => {
+                has_image = true;
+                blocks.push(ToolResultContent::Image {
+                    mime: img.mime_type.clone(),
+                    data: ImageData::Base64 {
+                        encoded: img.data.clone(),
+                    },
+                });
+            }
+            _ => {}
+        }
+    }
+    if blocks.is_empty() {
+        return None;
+    }
+    if has_image {
+        return Some(ToolResultBody::Content { blocks });
+    }
+    // 纯文本：拼成单条 Text。
+    let text = blocks
+        .into_iter()
+        .filter_map(|b| match b {
+            ToolResultContent::Text { text } => Some(text),
             _ => None,
-        },
-        _ => None,
-    })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(ToolResultBody::Text { text })
 }
 
 /// 单个工具流的驱动 task。把 [`ToolEvent`] 转发为 [`AgentEvent`]，最后产出
@@ -1399,7 +1446,7 @@ async fn drive_tool_stream(
     );
     let mut stream = tool.execute(args, ctx);
 
-    let mut last_text: Option<String> = None;
+    let mut last_body: Option<ToolResultBody> = None;
 
     // 注意：cancel 通过 ctx.cancel 注入工具内部，由工具自己感知并产出
     // [`ToolEvent::Failed(ToolError::Canceled)`]——不要在驱动层加 cancel arm。
@@ -1410,8 +1457,8 @@ async fn drive_tool_stream(
     while let Some(ev) = stream.next().await {
         match ev {
             ToolEvent::Progress(fields) => {
-                if let Some(text) = extract_text(&fields) {
-                    last_text = Some(text);
+                if let Some(body) = extract_body(&fields) {
+                    last_body = Some(body);
                 }
                 events
                     .emit(AgentEvent::ToolCallProgress {
@@ -1421,8 +1468,8 @@ async fn drive_tool_stream(
                     .await;
             }
             ToolEvent::Completed(fields) => {
-                if let Some(text) = extract_text(&fields) {
-                    last_text = Some(text);
+                if let Some(body) = extract_body(&fields) {
+                    last_body = Some(body);
                 }
                 let fields = with_status(fields, ToolCallStatus::Completed);
                 events
@@ -1435,9 +1482,9 @@ async fn drive_tool_stream(
                     id,
                     name,
                     tool_use_id,
-                    body: ToolResultBody::Text {
-                        text: last_text.unwrap_or_default(),
-                    },
+                    body: last_body.unwrap_or(ToolResultBody::Text {
+                        text: String::new(),
+                    }),
                     is_error: false,
                     fields: Some(fields),
                     error: None,

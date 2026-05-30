@@ -1377,6 +1377,7 @@ name = "defect-tools"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol-schema",
+ "base64",
  "defect-agent",
  "defect-config",
  "defect-http",

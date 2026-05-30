@@ -17,7 +17,8 @@ use std::task::{Context, Poll};
 use defect_agent::error::BoxError;
 use defect_agent::llm::{
     CompletionRequest, ImageData, Message, MessageContent, ProviderChunk, ProviderError,
-    ProviderErrorKind, Role, StopReason, ThinkingConfig, ToolChoice, ToolResultBody, Usage,
+    ProviderErrorKind, Role, StopReason, ThinkingConfig, ToolChoice, ToolResultBody,
+    ToolResultContent, Usage,
 };
 use defect_agent::tool::ToolSchema;
 use futures::{Stream, StreamExt};
@@ -184,26 +185,43 @@ fn encode_tool_result(
     is_error: bool,
     prompt_cache: &mut PromptCache,
 ) -> wire::ContentBlockParam {
-    let text = match output {
-        ToolResultBody::Text { text } => text.clone(),
-        ToolResultBody::Json { value } => value.to_string(),
-        _ => String::new(),
+    // Anthropic 的 tool_result 块原生支持文本与 image 子块，逐块映射即可。
+    let content: Vec<wire::ToolResultBlockParamContent> = match output {
+        ToolResultBody::Text { text } => vec![text_result_block(text.clone())],
+        ToolResultBody::Json { value } => vec![text_result_block(value.to_string())],
+        ToolResultBody::Content { blocks } => blocks
+            .iter()
+            .map(|b| match b {
+                ToolResultContent::Text { text } => text_result_block(text.clone()),
+                ToolResultContent::Image { mime, data } => {
+                    wire::ToolResultBlockParamContent::ImageBlockParam(wire::ImageBlockParam {
+                        source: encode_image_source(mime, data),
+                        r#type: wire::ImageBlockParamType::Image,
+                        cache_control: None,
+                    })
+                }
+                _ => text_result_block(String::new()),
+            })
+            .collect(),
+        _ => vec![text_result_block(String::new())],
     };
     wire::ContentBlockParam::ToolResultBlockParam(wire::ToolResultBlockParam {
         tool_use_id: tool_use_id.to_owned(),
         r#type: wire::ToolResultBlockParamType::ToolResult,
         cache_control: prompt_cache.next_breakpoint(),
         content: Some(
-            wire::ToolResultBlockParamContent102::ToolResultBlockParamContent102Variant1(vec![
-                wire::ToolResultBlockParamContent::TextBlockParam(wire::TextBlockParam {
-                    text,
-                    r#type: wire::TextBlockParamType::Text,
-                    cache_control: None,
-                    citations: None,
-                }),
-            ]),
+            wire::ToolResultBlockParamContent102::ToolResultBlockParamContent102Variant1(content),
         ),
         is_error: Some(is_error),
+    })
+}
+
+fn text_result_block(text: String) -> wire::ToolResultBlockParamContent {
+    wire::ToolResultBlockParamContent::TextBlockParam(wire::TextBlockParam {
+        text,
+        r#type: wire::TextBlockParamType::Text,
+        cache_control: None,
+        citations: None,
     })
 }
 

@@ -30,6 +30,12 @@ pub enum Frontend {
 }
 
 impl Frontend {
+    /// 文件系统是否委托给客户端代理。仅 [`Frontend::Acp`] 且协商出
+    /// `fs_delegated = true` 时为真；其余形态都在本地直接读写。
+    fn fs_delegated(self) -> bool {
+        matches!(self, Self::Acp { fs_delegated: true, .. })
+    }
+
     /// 渲染进 `# Environment` 段的单行描述。
     fn describe(self) -> String {
         match self {
@@ -68,12 +74,21 @@ impl<'a> RunningContext<'a> {
     /// 渲染 `# Environment` 段的正文（不含标题与分隔线，由
     /// [`crate::session::resolve_system_prompt`] 负责包裹）。
     pub fn render(&self) -> String {
-        let mut lines = Vec::with_capacity(5);
+        let mut lines = Vec::with_capacity(6);
         lines.push(format!("- platform: {}", platform_line()));
         lines.push(format!("- defect version: {}", env!("CARGO_PKG_VERSION")));
         lines.push(format!("- frontend: {}", self.frontend.describe()));
         lines.push(format!("- cwd: {}", self.cwd.display()));
         lines.push(format!("- shell: {}", shell_line()));
+        // 委托文件系统（ACP）的反向通道只能传文本，read_file 读图片会失败。
+        // 明确告诉模型别对图片用 read_file，避免无谓的报错往返。
+        if self.frontend.fs_delegated() {
+            lines.push(
+                "- note: the filesystem is delegated and only supports text reads; \
+                 do not use read_file on image or other binary files (it will fail)"
+                    .to_owned(),
+            );
+        }
         lines.join("\n")
     }
 }

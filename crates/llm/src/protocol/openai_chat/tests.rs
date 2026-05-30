@@ -18,6 +18,7 @@
 use defect_agent::llm::{
     CompletionRequest, ImageData, Message, MessageContent, ProviderChunk, ProviderErrorKind, Role,
     SamplingParams, StopReason, ThinkingConfig, ThinkingEcho, ToolChoice, ToolResultBody,
+    ToolResultContent,
 };
 use defect_agent::tool::ToolSchema;
 use futures::StreamExt;
@@ -592,6 +593,89 @@ fn encode_request_keeps_prompt_cache_key_stable_across_tool_result_followups() {
         panic!("expected list user content");
     };
     assert_eq!(parts.len(), 1);
+}
+
+#[test]
+fn encode_multimodal_tool_result_routes_image_to_following_user_message() {
+    // OpenAI 的 tool message 塞不进图片：文本留 tool message（含占位提示），
+    // 图片下沉到紧随其后的 user message。
+    let req = CompletionRequest {
+        model: "gpt-4o".into(),
+        system: None,
+        messages: vec![
+            Message {
+                role: Role::Assistant,
+                content: vec![MessageContent::ToolUse {
+                    id: "call_img".into(),
+                    name: "read_file".into(),
+                    args: json!({"path": "logo.png"}),
+                }]
+                .into(),
+            },
+            Message {
+                role: Role::User,
+                content: vec![MessageContent::ToolResult {
+                    tool_use_id: "call_img".into(),
+                    output: ToolResultBody::Content {
+                        blocks: vec![
+                            ToolResultContent::Text {
+                                text: "the logo".into(),
+                            },
+                            ToolResultContent::Image {
+                                mime: "image/png".into(),
+                                data: ImageData::Base64 {
+                                    encoded: "AAAA".into(),
+                                },
+                            },
+                        ],
+                    },
+                    is_error: false,
+                }]
+                .into(),
+            },
+        ],
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        sampling: SamplingParams::default(),
+        hosted_capabilities: ::defect_agent::llm::HostedCapabilities::default(),
+    };
+    let w = encode_request(&req);
+
+    // 顺序：system, assistant(tool_calls), tool message, user(image)
+    let tool_msg = w
+        .messages
+        .iter()
+        .find_map(|m| match m {
+            wire::ChatCompletionRequestMessage::ChatCompletionRequestToolMessage(t) => Some(t),
+            _ => None,
+        })
+        .expect("tool message");
+    let wire::ChatCompletionRequestToolMessageContent::ChatCompletionRequestToolMessageContentVariant0(text) =
+        &tool_msg.content
+    else {
+        panic!("expected text tool content");
+    };
+    assert!(text.contains("the logo"), "text: {text}");
+    assert!(text.contains("image"), "should mention images follow: {text}");
+
+    let user_msg = w
+        .messages
+        .iter()
+        .find_map(|m| match m {
+            wire::ChatCompletionRequestMessage::ChatCompletionRequestUserMessage(u) => Some(u),
+            _ => None,
+        })
+        .expect("user message with image");
+    let wire::ChatCompletionRequestUserMessageContent::ChatCompletionRequestUserMessageContentVariant1(parts) =
+        &user_msg.content
+    else {
+        panic!("expected list user content");
+    };
+    assert_eq!(parts.len(), 1);
+    assert!(matches!(
+        &parts[0],
+        wire::ChatCompletionRequestUserMessageContentPart::ChatCompletionRequestMessageContentPartImage(_)
+    ));
 }
 
 #[test]

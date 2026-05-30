@@ -145,9 +145,25 @@ pub(crate) fn estimate_message_tokens(msg: &Message) -> u64 {
 }
 
 fn tool_result_chars(output: &crate::llm::ToolResultBody) -> usize {
+    use crate::llm::{ToolResultBody, ToolResultContent};
     match output {
-        crate::llm::ToolResultBody::Text { text } => text.len(),
-        crate::llm::ToolResultBody::Json { value } => value.to_string().len(),
+        ToolResultBody::Text { text } => text.len(),
+        ToolResultBody::Json { value } => value.to_string().len(),
+        ToolResultBody::Content { blocks } => blocks
+            .iter()
+            .map(|b| match b {
+                ToolResultContent::Text { text } => text.len(),
+                ToolResultContent::Image { data, .. } => image_data_chars(data),
+            })
+            .sum(),
+    }
+}
+
+/// 图片块的字符近似：base64 串长 / URL 长。计量与压缩判定用，不要求精确。
+fn image_data_chars(data: &crate::llm::ImageData) -> usize {
+    match data {
+        crate::llm::ImageData::Base64 { encoded } => encoded.len(),
+        crate::llm::ImageData::Url { url } => url.len(),
     }
 }
 

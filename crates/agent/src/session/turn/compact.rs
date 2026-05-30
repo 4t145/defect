@@ -20,7 +20,7 @@ use futures::StreamExt;
 
 use crate::llm::{
     CompletionRequest, HostedCapabilities, Message, MessageContent, ProviderChunk, Role,
-    SamplingParams, StopReason, ThinkingConfig, ToolChoice, ToolResultBody,
+    SamplingParams, StopReason, ThinkingConfig, ToolChoice, ToolResultBody, ToolResultContent,
 };
 use crate::session::history::estimate_message_tokens;
 use crate::session::{CompactionReport, TurnError};
@@ -354,6 +354,22 @@ fn truncate_tool_output(output: &ToolResultBody) -> ToolResultBody {
                 ToolResultBody::Text {
                     text: truncate_chars(&s, TOOL_RESULT_MAX_CHARS),
                 }
+            }
+        }
+        // 多模态结果在摘要里降级成纯文本：保留文本块（截断），图片块换成
+        // 占位标注——base64 喂进摘要既无意义又昂贵。
+        ToolResultBody::Content { blocks } => {
+            let mut text = String::new();
+            for block in blocks {
+                match block {
+                    ToolResultContent::Text { text: t } => text.push_str(t),
+                    ToolResultContent::Image { mime, .. } => {
+                        text.push_str(&format!("\n[image: {mime}]"));
+                    }
+                }
+            }
+            ToolResultBody::Text {
+                text: truncate_chars(&text, TOOL_RESULT_MAX_CHARS),
             }
         }
     }

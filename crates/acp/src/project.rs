@@ -12,7 +12,9 @@ use agent_client_protocol::schema::{
     ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
 use defect_agent::event::AgentEvent;
-use defect_agent::llm::{ImageData, Message, MessageContent, Role, ToolResultBody};
+use defect_agent::llm::{
+    ImageData, Message, MessageContent, Role, ToolResultBody, ToolResultContent,
+};
 use defect_agent::policy::PolicyDecision;
 
 const REPLAY_TOOL_RESULT_TITLE: &str = "Tool result";
@@ -182,13 +184,11 @@ fn replay_tool_result(
     } else {
         ToolCallStatus::Completed
     };
-    let output_text = tool_result_text(output);
+    let blocks = tool_result_blocks(output);
     let fields = ToolCallUpdateFields::new()
         .title(REPLAY_TOOL_RESULT_TITLE.to_string())
         .status(status)
-        .content(vec![ToolCallContent::Content(Content::new(text_block(
-            output_text,
-        )))]);
+        .content(blocks);
     notifications.push(notification(
         session_id,
         SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
@@ -198,12 +198,26 @@ fn replay_tool_result(
     ));
 }
 
-fn tool_result_text(output: &ToolResultBody) -> String {
-    match output {
-        ToolResultBody::Text { text } => text.clone(),
-        ToolResultBody::Json { value } => value.to_string(),
-        _ => String::new(),
-    }
+/// 把 [`ToolResultBody`] 还原成给客户端 UI 重放的 ACP content 块。
+/// 多模态结果逐块还原成文本/图片块；文本/JSON 仍是单个文本块。
+fn tool_result_blocks(output: &ToolResultBody) -> Vec<ToolCallContent> {
+    let blocks = match output {
+        ToolResultBody::Text { text } => vec![text_block(text.clone())],
+        ToolResultBody::Json { value } => vec![text_block(value.to_string())],
+        ToolResultBody::Content { blocks } => blocks
+            .iter()
+            .map(|b| match b {
+                ToolResultContent::Text { text } => text_block(text.clone()),
+                ToolResultContent::Image { mime, data } => image_block(mime, data),
+                _ => text_block(String::new()),
+            })
+            .collect(),
+        _ => vec![text_block(String::new())],
+    };
+    blocks
+        .into_iter()
+        .map(|b| ToolCallContent::Content(Content::new(b)))
+        .collect()
 }
 
 fn text_block(text: String) -> agent_client_protocol::schema::ContentBlock {

@@ -93,6 +93,28 @@ impl FsBackend for LocalFsBackend {
         })
     }
 
+    fn read_bytes(&self, path: PathBuf) -> BoxFuture<'_, Result<Vec<u8>, FsError>> {
+        Box::pin(async move {
+            let abs = resolve_workspace_path(&self.workspace_root, &path)?;
+
+            let metadata = fs::metadata(&abs).await.map_err(|e| match e.kind() {
+                io::ErrorKind::NotFound => FsError::NotFound(abs.clone()),
+                _ => FsError::Backend(BoxError::new(e)),
+            })?;
+            if metadata.len() > MAX_FS_BYTES {
+                return Err(FsError::TooLarge {
+                    bytes: metadata.len(),
+                    limit: MAX_FS_BYTES,
+                });
+            }
+
+            fs::read(&abs).await.map_err(|e| match e.kind() {
+                io::ErrorKind::NotFound => FsError::NotFound(abs.clone()),
+                _ => FsError::Backend(BoxError::new(e)),
+            })
+        })
+    }
+
     /// 用 mtime + size 做指纹——比走默认的"读全文 + hash"路径便宜得多，
     /// 且对 v1 conflict detection 的语义足够：mtime 变了 / size 变了
     /// 即视为冲突。
