@@ -81,6 +81,8 @@ struct PendingGeneration {
     output: String,
     /// 累积的 thinking 文本（放进 generation 的 metadata.reasoning，不进 output）。
     thinking: String,
+    /// 本次调用的 token 用量（来自 LlmCallFinished.usage，流 drain 后到达）。
+    usage: Usage,
     /// 失败信息（来自 LlmCallFinished.error）。
     error: Option<String>,
 }
@@ -135,11 +137,12 @@ impl TraceProjector {
                 self.accumulate_thinking(&content);
                 Vec::new()
             }
-            AgentEvent::LlmCallFinished { error, .. } => {
-                // 注意：LlmCallFinished 在流式响应**之前**到达，usage 此时为空、
-                // output 还没来。所以这里只记录 error，generation 的收尾（output/
-                // thinking/endTime）延迟到下一次 LlmCallStarted 或 TurnEnded。
-                self.note_llm_error(error);
+            AgentEvent::LlmCallFinished { usage, error, .. } => {
+                // LlmCallFinished 现在由 run_inner 在流 drain 之后发，带**本次调用**的
+                // 真 usage（非 turn 累计）。记到当前 generation，收尾时写入 usageDetails。
+                // generation 收尾（output/thinking/endTime）仍延迟到下次 LlmCallStarted
+                // 或 TurnEnded——保证 generation-create 先于 update。
+                self.note_llm_finished(usage, error);
                 Vec::new()
             }
             AgentEvent::ToolCallStarted { id, name, fields } => {
@@ -224,6 +227,7 @@ impl TraceProjector {
             model: model.clone(),
             output: String::new(),
             thinking: String::new(),
+            usage: Usage::default(),
             error: None,
         });
 
@@ -273,13 +277,16 @@ impl TraceProjector {
         }
     }
 
-    /// 记录 LLM 调用错误（LlmCallFinished.error）到当前 generation，收尾时写出。
-    fn note_llm_error(&mut self, error: Option<String>) {
-        if let Some(err) = error
-            && let Some(turn) = self.turn.as_mut()
+    /// 记录 LLM 调用结束（LlmCallFinished）的 usage / error 到当前 generation，
+    /// 收尾时写出。usage 是**本次调用**的（非 turn 累计）。
+    fn note_llm_finished(&mut self, usage: Usage, error: Option<String>) {
+        if let Some(turn) = self.turn.as_mut()
             && let Some(pg) = turn.current_gen.as_mut()
         {
-            pg.error = Some(err);
+            pg.usage = usage;
+            if error.is_some() {
+                pg.error = error;
+            }
         }
     }
 
@@ -312,6 +319,8 @@ impl TraceProjector {
             model: Some(pg.model),
             end_time: Some(now.to_string()),
             output: (!pg.output.is_empty()).then_some(serde_json::Value::String(pg.output)),
+            // 本次调用的 usage（非 turn 累计）——这才是单次 generation 的真用量。
+            usage_details: usage_to_details(&pg.usage),
             metadata: (!meta.is_empty()).then_some(serde_json::Value::Object(meta)),
             level: pg.error.as_ref().map(|_| ObservationLevel::Error),
             status_message: pg.error,

@@ -239,13 +239,24 @@ impl<'a> TurnRunner<'a> {
             self.maybe_compact().await?;
 
             let req = self.build_request();
-            let mut stream = self.call_llm_with_retry(&req, &mut state).await?;
+            let (mut stream, attempt) = self.call_llm_with_retry(&req, &mut state).await?;
 
             let outcome = self.drain_provider_stream(&mut stream, &mut state).await?;
 
             if outcome.cancelled {
                 return Ok(turn_outcome(&state, AcpStopReason::Cancelled));
             }
+
+            // 流已 drain，本次调用的 usage 到齐——现在发 LlmCallFinished，带**单次**
+            // 调用的真 usage（outcome.usage，非 turn 累计 state.usage）。
+            self.events
+                .emit(AgentEvent::LlmCallFinished {
+                    model: req.model.clone(),
+                    attempt,
+                    usage: outcome.usage,
+                    error: None,
+                })
+                .await;
 
             let assistant = assistant_message(&outcome);
             if !assistant.content.is_empty() {
@@ -324,11 +335,12 @@ impl<'a> TurnRunner<'a> {
         Ok(())
     }
 
+    /// 返回成功拿到的流 + 成功时的 attempt 号（供 run_inner 发 LlmCallFinished）。
     async fn call_llm_with_retry(
         &self,
         req: &CompletionRequest,
         state: &mut TurnState,
-    ) -> Result<ProviderStream, TurnError> {
+    ) -> Result<(ProviderStream, u32), TurnError> {
         let max_attempts = self.config.max_llm_retries.saturating_add(1).max(1);
         let vendor = self.provider.info().vendor.to_string();
         let mut attempt: u32 = 0;
@@ -352,9 +364,10 @@ impl<'a> TurnRunner<'a> {
                 .instrument(span)
                 .await;
             match step {
-                LlmAttempt::Done(stream) => return Ok(stream),
+                LlmAttempt::Done(stream) => return Ok((stream, attempt)),
                 LlmAttempt::Failed(err) => return Err(TurnError::Provider(err)),
-                LlmAttempt::Cancelled => return Ok(empty_stream()),
+                // Cancelled：返回空流，attempt 号无意义（不会发 Finished，见 run_inner）。
+                LlmAttempt::Cancelled => return Ok((empty_stream(), attempt)),
                 LlmAttempt::Retry => continue,
             }
         }
@@ -388,14 +401,9 @@ impl<'a> TurnRunner<'a> {
             .await
         {
             Ok(stream) => {
-                self.events
-                    .emit(AgentEvent::LlmCallFinished {
-                        model: req.model.clone(),
-                        attempt,
-                        usage: Usage::default(),
-                        error: None,
-                    })
-                    .await;
+                // 成功路径**不在这里**发 LlmCallFinished——此刻流还没 drain，
+                // 本次调用的 usage 尚未到达。Finished 由 run_inner 在 drain 之后
+                // 带上 outcome.usage（单次调用真 usage）发出。
                 LlmAttempt::Done(stream)
             }
             Err(err) => {

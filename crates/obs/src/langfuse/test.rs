@@ -211,19 +211,8 @@ fn llm_call_lifecycle_creates_then_updates_generation() {
     assert_eq!(created[0]["body"]["input"][1]["role"], "user");
     assert_eq!(created[0]["body"]["input"][1]["content"], "hi there");
 
-    // 真实顺序：LlmCallFinished 先到（usage 此时为空），output/thinking 之后才流式来。
-    let after_finished = project_json(
-        &mut proj,
-        AgentEvent::LlmCallFinished {
-            model: "claude-opus-4-8".into(),
-            attempt: 1,
-            usage: Usage::default(),
-            error: None,
-        },
-        &mut ids,
-    );
-    // Finished 本身不产出 ingestion 事件（generation 收尾被延迟）。
-    assert!(after_finished.is_empty());
+    // output/thinking 流式到达。
+    // （真实顺序里 AssistantText 在 LlmCallFinished 之后，但 projector 对二者顺序不敏感）
 
     project_json(
         &mut proj,
@@ -247,6 +236,22 @@ fn llm_call_lifecycle_creates_then_updates_generation() {
         &mut ids,
     );
 
+    // LlmCallFinished 带**本次调用**的 usage（流 drain 后到达）。
+    project_json(
+        &mut proj,
+        AgentEvent::LlmCallFinished {
+            model: "claude-opus-4-8".into(),
+            attempt: 1,
+            usage: Usage {
+                input_tokens: Some(80),
+                output_tokens: Some(12),
+                ..Default::default()
+            },
+            error: None,
+        },
+        &mut ids,
+    );
+
     // generation-update 在 TurnEnded 时才 flush，且先于 trace 更新。
     let ended = project_json(
         &mut proj,
@@ -266,10 +271,97 @@ fn llm_call_lifecycle_creates_then_updates_generation() {
     // thinking 放 metadata.reasoning，不进 output。
     assert_eq!(ended[0]["body"]["metadata"]["reasoning"], "let me think");
     assert!(ended[0]["body"].get("level").is_none());
-    // 第二个事件是 trace 收尾（usage 在 turn 级）。
+    // generation 的 usageDetails = 本次调用 usage（80/12），非 turn 累计（100/20）。
+    assert_eq!(ended[0]["body"]["usageDetails"]["input"], 80);
+    assert_eq!(ended[0]["body"]["usageDetails"]["output"], 12);
+    // 第二个事件是 trace 收尾，usage 是 turn 级累计（100/20）。
     assert_eq!(ended[1]["type"], "trace-create");
     assert_eq!(ended[1]["body"]["output"], "hello world");
     assert_eq!(ended[1]["body"]["metadata"]["usage"]["input"], 100);
+}
+
+#[test]
+fn two_llm_calls_get_distinct_per_call_usage() {
+    // 多轮（工具循环）场景：一个 turn 内两次 LLM 调用，各自 usage 不同——
+    // 这是本次修复的核心（之前 generation 全无 usage / 只有 turn 总和）。
+    let mut proj = TraceProjector::new("s");
+    let mut ids = counter_ids();
+    project_json(&mut proj, AgentEvent::TurnStarted, &mut ids);
+
+    // 第 1 次调用：usage 50/10。
+    project_json(
+        &mut proj,
+        AgentEvent::LlmCallStarted {
+            model: "m".into(),
+            attempt: 1,
+            request: snapshot(None, "first"),
+        },
+        &mut ids,
+    );
+    project_json(
+        &mut proj,
+        AgentEvent::LlmCallFinished {
+            model: "m".into(),
+            attempt: 1,
+            usage: Usage {
+                input_tokens: Some(50),
+                output_tokens: Some(10),
+                ..Default::default()
+            },
+            error: None,
+        },
+        &mut ids,
+    );
+
+    // 第 2 次调用开始 → 先 flush 第 1 个 generation（带它自己的 50/10）。
+    let gen1_flush = project_json(
+        &mut proj,
+        AgentEvent::LlmCallStarted {
+            model: "m".into(),
+            attempt: 1,
+            request: snapshot(None, "second"),
+        },
+        &mut ids,
+    );
+    // 先 generation-update（gen1 收尾），再 generation-create（gen2）。
+    assert_eq!(gen1_flush[0]["type"], "generation-update");
+    assert_eq!(gen1_flush[0]["body"]["usageDetails"]["input"], 50);
+    assert_eq!(gen1_flush[0]["body"]["usageDetails"]["output"], 10);
+    assert_eq!(gen1_flush[1]["type"], "generation-create");
+
+    // 第 2 次调用 usage 200/40（明显不同于第 1 次）。
+    project_json(
+        &mut proj,
+        AgentEvent::LlmCallFinished {
+            model: "m".into(),
+            attempt: 1,
+            usage: Usage {
+                input_tokens: Some(200),
+                output_tokens: Some(40),
+                ..Default::default()
+            },
+            error: None,
+        },
+        &mut ids,
+    );
+    let ended = project_json(
+        &mut proj,
+        AgentEvent::TurnEnded {
+            reason: StopReason::EndTurn,
+            usage: Usage {
+                input_tokens: Some(250),
+                output_tokens: Some(50),
+                ..Default::default()
+            },
+        },
+        &mut ids,
+    );
+    // gen2 收尾带它自己的 200/40，不是 turn 累计 250/50。
+    assert_eq!(ended[0]["type"], "generation-update");
+    assert_eq!(ended[0]["body"]["usageDetails"]["input"], 200);
+    assert_eq!(ended[0]["body"]["usageDetails"]["output"], 40);
+    // trace 总和 250/50。
+    assert_eq!(ended[1]["body"]["metadata"]["usage"]["input"], 250);
 }
 
 #[test]

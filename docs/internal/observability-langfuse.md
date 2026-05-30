@@ -149,19 +149,24 @@ UUID v4（`new_session_id()`，`crates/agent/src/session/default.rs`）：
 上表是接入前的设计草案。真实事件流的时序比预期复杂，实现（`projector.rs`）做了如下
 关键调整——**以代码为准**：
 
-1. **generation 收尾延迟到 flush，而非在 `LlmCallFinished`。** turn 主循环里
-   `LlmCallStarted` → `LlmCallFinished` 这对事件**只包住"发起请求"这一瞬间**，
-   `LlmCallFinished` 在流式响应（`AssistantText` / `Usage` chunk）**到达之前**就发出，
-   且其 `usage` 永远是 `Usage::default()`（空）。因此：
-   - generation 的 `output` / `thinking` / `endTime` 收尾（`generation-update`）**延迟**到
-     **下一次 `LlmCallStarted` 或 `TurnEnded`** 时才 flush；
-   - 这同时保证 `generation-create` 永远先于 `generation-update`——否则 Langfuse 报
-     `observation not found`（update 先到时找不到父 observation）。
-   - `LlmCallFinished` 本身只记 error 到当前 generation，不产出 ingestion 事件。
+1. **generation 收尾延迟到 flush，而非在 `LlmCallFinished` 当场产出。**
+   - generation 的 `output` / `thinking` / `usageDetails` / `endTime` 收尾
+     （`generation-update`）**延迟**到**下一次 `LlmCallStarted` 或 `TurnEnded`** 时才 flush；
+   - 这保证 `generation-create` 永远先于 `generation-update`——否则 Langfuse 报
+     `observation not found`（update 先到时找不到 observation）。
+   - `LlmCallFinished` 本身不产出 ingestion 事件，只把 usage / error 记到当前 generation。
 
-2. **generation 拿不到 usage——usage 只在 turn/trace 级准确。** 真 usage 走
-   `ProviderChunk::Usage` 累积到 `outcome.usage` / `state.usage`，最终只体现在
-   `TurnEnded.usage`。generation 级别没有可靠 usage，写在 trace 的 `metadata.usage`。
+2. **`LlmCallFinished` 的发出时机与 per-call usage（2026-05 修复）。** 早期实现把
+   `LlmCallFinished` 在 `call_llm_attempt` 里、**流 drain 之前**就发，usage 恒为
+   `Usage::default()`（空）——导致每个 generation 都没有自己的 usage，只有 trace 上一个
+   turn 总和。修复后：**成功路径的 `LlmCallFinished` 移到 `run_inner` 的 drain 之后发**
+   （`call_llm_with_retry` 回传成功 attempt 号），带上 `outcome.usage`——即**本次调用**的
+   真 usage（非 turn 累计）。错误/重试路径仍在 `call_llm_attempt` 里发（出 token 前失败，
+   本就无 usage）。
+   - **语义分层**：`generation.usageDetails` = 单次 LLM 调用用量；
+     `trace.metadata.usage` = 整个 turn 的累计总和（`TurnEnded.usage` = `state.usage`）。
+     多轮（工具循环）下每个 generation 显示各自用量，trace 显示总和。
+   - `storage` / `acp` 都用 `{ .. }` 忽略这两个事件，故改发出时机不影响它们。
 
 3. **generation `input` = 完整 prompt。** `LlmCallStarted` 携带 `LlmRequestSnapshot`
    { system, messages }（见 `event.rs`），projector 还原成标准 chat messages 数组，
