@@ -27,6 +27,7 @@ use crate::shell::ShellBackend;
 use crate::tool::{Tool, ToolSchema};
 
 mod capabilities;
+mod context;
 mod default;
 mod events;
 mod history;
@@ -39,6 +40,7 @@ pub use capabilities::{
     ResolvedSessionCapabilities, SessionCapabilitiesConfig, WebSearchCapabilityConfig,
     WebSearchCapabilityMode,
 };
+pub use context::{Frontend, RunningContext};
 pub use default::{DefaultAgentCore, DefaultAgentCoreBuilder, DefaultSession, new_session_id};
 pub use events::EventEmitter;
 pub use history::VecHistory;
@@ -80,6 +82,9 @@ pub trait AgentCore: Send + Sync {
     /// [`ClientCapabilities::terminal`] 选择 `LocalShellBackend` 或
     /// `AcpShellBackend`。session 持有它的 `Arc`，`bash` 工具调用都走它。
     ///
+    /// `frontend` 标记 agent 被如何接入（[`Frontend::Acp`] 携带 ACP 握手协商
+    /// 出的 fs / shell 委托状态），用于注入 system prompt 的 `# Environment` 段。
+    ///
     /// # Errors
     ///
     /// MCP 启动失败、cwd 不存在、id 重复等。
@@ -93,9 +98,13 @@ pub trait AgentCore: Send + Sync {
         mcp_servers: Vec<McpServer>,
         fs: Arc<dyn FsBackend>,
         shell: Arc<dyn ShellBackend>,
+        frontend: Frontend,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
 
     /// 从持久化状态恢复一个已存在的 session。
+    ///
+    /// `frontend` 同 [`AgentCore::create_session`]——恢复出的 session 也要据此
+    /// 注入运行环境信息。
     ///
     /// # Errors
     ///
@@ -105,6 +114,7 @@ pub trait AgentCore: Send + Sync {
         id: SessionId,
         fs: Arc<dyn FsBackend>,
         shell: Arc<dyn ShellBackend>,
+        frontend: Frontend,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>>;
 
     /// 按 id 查找已存在的 session。
@@ -246,11 +256,17 @@ pub struct LoadedSession {
     pub history: Vec<Message>,
 }
 
-/// 消息历史的抽象。
+/// 消息历史的抽象——**纯存储 + token 计量**。
 ///
-/// v0 实现仅是 `Vec<Message>` + `Mutex` 的最小封装，但 trait 留出
-/// 后续上压缩 / token 计数 / resume 的口子。turn 主循环不直接接触
-/// `Vec<Message>`，只通过这个 trait 拼下一轮的输入。
+/// 压缩这件事**不在这里**：摘要需要调 LLM，而存储抽象够不到 provider。
+/// 压缩编排在 turn 主循环（`session/turn/compact.rs`）里完成——它读
+/// [`History::snapshot`]、调 LLM 摘要、再用 [`History::replace`] 把算好的
+/// 新消息列表整体写回。本 trait 只负责：追加、快照、整体替换、以及给
+/// 主循环报一个「当前历史值多少 token」的估算。
+///
+/// token 估算策略（详见 [`VecHistory`]）：以上一次 LLM 调用回报的**真实
+/// 输入 token**为基线，叠加其后新追加消息的**字符启发式**增量；真实基线
+/// 不可用时整份走字符启发式兜底。turn 主循环用它与压缩阈值比较。
 pub trait History: Send + Sync {
     /// 追加一条消息。
     fn append(&self, msg: Message);
@@ -258,12 +274,17 @@ pub trait History: Send + Sync {
     /// 当前历史的快照，用于喂给下一轮 LLM 调用。
     fn snapshot(&self) -> Vec<Message>;
 
-    /// 估算当前历史的 token 数。`None` 表示估算不可用（v0 默认行为）。
-    fn token_estimate(&self) -> Option<u64>;
+    /// 压缩后整体替换消息列表。turn 主循环算好「摘要 + 保留尾部」的新列表后
+    /// 调它回写。实现应同时重置 token 估算基线（旧的真实 token 已不适用新列表）。
+    fn replace(&self, messages: Vec<Message>);
 
-    /// 主循环触发的"压缩"钩子。v0 实现可以是 no-op；
-    /// 真正实现压缩时通过此入口（详见 `docs/internal/turn-loop.md`）。
-    fn compact(&self) -> BoxFuture<'_, Result<CompactionReport, BoxError>>;
+    /// 喂入上一次 LLM 调用的真实输入 token 数
+    /// （`input + cache_read + cache_creation`）。作为 [`Self::token_estimate`]
+    /// 的精确基线；其后 [`Self::append`] 的消息走字符启发式增量叠加。
+    fn record_input_tokens(&self, tokens: u64);
+
+    /// 估算当前历史的 token 数。`None` 表示历史为空 / 无可用估算。
+    fn token_estimate(&self) -> Option<u64>;
 }
 
 /// 压缩报告。压缩前后的 token 数据被主循环包成 [`AgentEvent::ContextCompressed`]。

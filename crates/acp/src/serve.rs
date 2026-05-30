@@ -19,7 +19,9 @@ use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Stdio};
 use defect_agent::event::{AgentEvent, PermissionResolution};
 use defect_agent::fs::FsBackend;
 use defect_agent::llm::{ModelCandidate, ModelInfo, ProviderError, ProviderInfo};
-use defect_agent::session::{AgentCore, AgentError, Session, TurnError, new_session_id};
+use defect_agent::session::{
+    AgentCore, AgentError, Frontend, Session, TurnError, new_session_id,
+};
 use defect_agent::shell::ShellBackend;
 use defect_tools::{LocalFsBackend, LocalShellBackend};
 use futures::StreamExt;
@@ -355,6 +357,15 @@ impl ServeState {
             .unwrap_or(ShellMode::Local)
     }
 
+    /// 由当前协商出的 fs / shell mode 组装 [`Frontend::Acp`]——agent 据此在
+    /// system prompt 的 `# Environment` 段标明文件 / 命令执行是本地还是委托。
+    fn frontend(&self) -> Frontend {
+        Frontend::Acp {
+            fs_delegated: self.current_fs_mode() == FsMode::Delegated,
+            shell_delegated: self.current_shell_mode() == ShellMode::Delegated,
+        }
+    }
+
     /// 在 connection 级 fs_mode 与 session 级 cwd 之间组装 fs 后端。
     fn fs_backend(
         &self,
@@ -434,9 +445,10 @@ impl ServeState {
         let session_id = SessionId::new(new_session_id());
         let fs = self.fs_backend(&cx, &session_id, &req.cwd);
         let shell = self.shell_backend(&cx, &session_id, &req.cwd);
+        let frontend = self.frontend();
         match self
             .agent
-            .create_session(session_id, req.cwd, req.mcp_servers, fs, shell)
+            .create_session(session_id, req.cwd, req.mcp_servers, fs, shell, frontend)
             .await
         {
             Ok(session) => {
@@ -466,7 +478,12 @@ impl ServeState {
         let cwd_for_log = req.cwd.clone();
         let fs = self.fs_backend(&cx, &session_id, &req.cwd);
         let shell = self.shell_backend(&cx, &session_id, &req.cwd);
-        match self.agent.load_session(session_id.clone(), fs, shell).await {
+        let frontend = self.frontend();
+        match self
+            .agent
+            .load_session(session_id.clone(), fs, shell, frontend)
+            .await
+        {
             Ok(session) => {
                 let models = session_model_state(session.as_ref()).await;
                 for notification in replay_notifications(&session_id, &session.history_snapshot()) {

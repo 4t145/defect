@@ -49,6 +49,7 @@ use crate::llm::{
 };
 use crate::policy::{AskWritesPolicy, SandboxPolicy};
 use crate::session::capabilities::{ResolvedSessionCapabilities, SessionCapabilitiesConfig};
+use crate::session::context::{Frontend, RunningContext};
 use crate::session::events::EventEmitter;
 use crate::session::permissions::PermissionGate;
 use crate::session::prompt::resolve_system_prompt;
@@ -275,6 +276,7 @@ impl AgentCore for DefaultAgentCore {
         mcp_servers: Vec<McpServer>,
         fs: Arc<dyn FsBackend>,
         shell: Arc<dyn ShellBackend>,
+        frontend: Frontend,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>> {
         Box::pin(async move {
             if !cwd.is_absolute() || !cwd.exists() {
@@ -334,6 +336,7 @@ impl AgentCore for DefaultAgentCore {
                 ),
                 fs,
                 shell,
+                frontend,
                 http: self.http.clone(),
                 hook_engine: self.hook_engine.clone(),
                 session_start_append,
@@ -361,6 +364,7 @@ impl AgentCore for DefaultAgentCore {
         id: SessionId,
         fs: Arc<dyn FsBackend>,
         shell: Arc<dyn ShellBackend>,
+        frontend: Frontend,
     ) -> BoxFuture<'_, Result<Arc<dyn Session>, AgentError>> {
         Box::pin(async move {
             if let Some(existing) = self.sessions.get(&id) {
@@ -421,6 +425,7 @@ impl AgentCore for DefaultAgentCore {
                 ),
                 fs,
                 shell,
+                frontend,
                 http: self.http.clone(),
                 hook_engine: self.hook_engine.clone(),
                 session_start_append,
@@ -511,6 +516,9 @@ pub struct DefaultSession {
     /// session 级 shell 后端。与 `fs` 同款由 [`AgentCore::create_session`] 注入；
     /// `bash` 工具通过 [`crate::tool::ToolContext`] 拿它。
     shell: Arc<dyn ShellBackend>,
+    /// agent 接入方式。由 [`AgentCore::create_session`] / `load_session` 注入，
+    /// turn 装配时组进 [`RunningContext`]，渲染进 system prompt 的 `# Environment` 段。
+    frontend: Frontend,
     /// HTTP fetch 后端（本 core 的多 session 共享，由 [`DefaultAgentCore`]
     /// 一份持有 / clone）。`fetch` 工具通过 [`crate::tool::ToolContext`] 拿它。
     http: Arc<dyn HttpClient>,
@@ -730,8 +738,9 @@ impl Session for DefaultSession {
                 // provider；下一 turn 才生效。
                 let provider = self.current_provider();
                 let hosted = self.current_hosted();
+                let running_ctx = RunningContext::new(self.frontend, &self.cwd);
                 let system_prompt = resolve_system_prompt(
-                    &self.cwd,
+                    &running_ctx,
                     &provider.info().vendor,
                     &config.model,
                     &config.base_prompt,

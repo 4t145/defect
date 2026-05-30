@@ -292,8 +292,10 @@ no_proxy = ["localhost", ".internal"]
 - `providers.<name>.models` 是该 provider 在配置层声明的候选白名单。
 - ACP 暴露给前端的模型候选会先取 provider `list_models()`，再与配置白名单取交集。
 - `base_prompt` 是**单层覆盖**语义。最终只选择最高优先级且显式声明的那一层；该层内部可同时提供 `file` 与 `text`，按 `file -> text` 拼接。
-- `prompt` 是**逐层追加**语义。当前顺序为：`prompt.text -> prompt.file(默认 AGENTS.md) -> provider overlay -> model overlay -> session overlay`。
+- `prompt` 是**逐层追加**语义。当前顺序为：`base_prompt -> Environment -> prompt.text -> prompt.file(默认 AGENTS.md) -> provider overlay -> model overlay -> session overlay`。
 - `prompt.file` 默认值为 `AGENTS.md`。当使用默认值时，会从 repo root 到当前 `cwd` 逐级收集同名文件并顺序拼接，便于项目级 prompt 自然随目录层级叠加。
+- **拼接格式**：每个片段套一级标题（`#`，如 `# Base Prompt` / `# Project Instructions (apps/web/AGENTS.md)`），片段之间以 markdown 水平分割线（`---`）相隔，让模型把每段当作独立文档理解。**编写 `base_prompt` / `AGENTS.md` 等 prompt 文档时，正文标题请从二级（`##`）起步**——一级标题（`#`）由注入层占用，从二级起步可自然嵌套其下，避免与片段边界混淆。
+- **`# Environment` 段**：在 `base_prompt`（身份）之后、project 约定之前自动注入运行环境事实——平台与发行版版本、defect 版本、frontend 接入方式（ACP 时附带 fs / shell 是 `local` 直控还是 `delegated` 经客户端代理）、cwd、默认 shell。该段始终注入，不受 prompt 配置是否为空影响。
 - `[http]` 顶段对应 `defect_http::HttpStackConfig`；`mode = "explicit"` 时需要同时给出 `http_proxy` / `https_proxy`，`no_proxy` 走 [GNU 风格](https://about.gitlab.com/blog/we-need-to-talk-no-proxy/) 域名后缀匹配。`mode = "from-env"`（默认）从 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 环境变量读取；`mode = "disabled"` 强制不走代理。
 
 [mcp.servers.docs]

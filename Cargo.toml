@@ -65,6 +65,9 @@ arc-swap = "1"
 # 标识符
 uuid = { version = "1", features = ["v4"] }
 
+# 运行环境探测（注入 system prompt 的平台/发行版版本）
+os_info = { version = "3", default-features = false }
+
 # 可观测性上报（langfuse ingestion）
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

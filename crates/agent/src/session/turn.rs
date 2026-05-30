@@ -48,6 +48,9 @@ const DEFAULT_PROMPT_FILE: &str = "AGENTS.md";
 #[path = "turn/request_audit.rs"]
 mod request_audit;
 
+#[path = "turn/compact.rs"]
+mod compact;
+
 pub(crate) use request_audit::RequestAuditTracker;
 
 /// LLM 调用次数上限策略。详见 `docs/internal/turn-loop.md` §6.1。
@@ -95,7 +98,14 @@ pub struct TurnConfig {
     pub prompt: PromptConfig,
     pub sampling: SamplingParams,
     pub request_limit: TurnRequestLimit,
+    /// 压缩阈值的**绝对值显式覆盖**（token 数）。`Some` 时优先于
+    /// [`Self::compact_ratio`] 推算。`None` 则按 ratio 自动推算。
     pub compact_threshold_tokens: Option<u64>,
+    /// 压缩阈值占模型 `context_window` 的比例（如 `0.85` = 用量过 85% 触发）。
+    /// `None` = 不按比例自动压缩（且无绝对值时本 turn 完全不压缩）。
+    /// 仅在 `compact_threshold_tokens` 为 `None` 且模型公开 `context_window`
+    /// 时生效。详见 `session/turn/compact.rs`。
+    pub compact_ratio: Option<f64>,
     pub max_llm_retries: u32,
     /// `0` = 不限。v0 默认不限。
     pub max_concurrent_tools: usize,
@@ -115,6 +125,9 @@ impl Default for TurnConfig {
                 expand_on_progress: true,
             },
             compact_threshold_tokens: None,
+            // 默认按 context_window 的 85% 触发——留 ~15% 给摘要输出与浮动，
+            // 落在 codex(90%)/Claude(~93%)/opencode(window-20k) 的合理区间内。
+            compact_ratio: Some(0.85),
             max_llm_retries: 3,
             max_concurrent_tools: 0,
         }
@@ -258,6 +271,13 @@ impl<'a> TurnRunner<'a> {
                 })
                 .await;
 
+            // 把本次调用回报的真实输入 token 喂给 history，作为压缩阈值判断的
+            // 精确基线（详见 `session/turn/compact.rs`）。本次发出的 messages 即
+            // req.messages，其真实输入量就是 outcome.usage 的输入侧三项之和。
+            if let Some(real_input) = real_input_tokens(&outcome.usage) {
+                self.history.record_input_tokens(real_input);
+            }
+
             let assistant = assistant_message(&outcome);
             if !assistant.content.is_empty() {
                 self.history.append(assistant);
@@ -315,8 +335,14 @@ impl<'a> TurnRunner<'a> {
         req
     }
 
+    /// 压缩触发判定 + 编排。详见 `session/turn/compact.rs`。
+    ///
+    /// 阈值解析顺序：
+    /// 1. `compact_threshold_tokens`（绝对值）显式覆盖；
+    /// 2. 否则按 `model_info(model).context_window * compact_ratio` 自动推算；
+    /// 3. 两者都拿不到 → 不压缩（保持 v0 语义）。
     async fn maybe_compact(&self) -> Result<(), TurnError> {
-        let Some(threshold) = self.config.compact_threshold_tokens else {
+        let Some(threshold) = self.compact_threshold() else {
             return Ok(());
         };
         let Some(estimate) = self.history.token_estimate() else {
@@ -325,7 +351,11 @@ impl<'a> TurnRunner<'a> {
         if estimate < threshold {
             return Ok(());
         }
-        let report = self.history.compact().await.map_err(TurnError::Internal)?;
+
+        let Some(report) = compact::run(self, threshold).await? else {
+            // 没有安全的压缩边界（如单个超长轮次）——本次跳过，不发事件。
+            return Ok(());
+        };
         self.events
             .emit(AgentEvent::ContextCompressed {
                 tokens_before: report.tokens_before,
@@ -333,6 +363,18 @@ impl<'a> TurnRunner<'a> {
             })
             .await;
         Ok(())
+    }
+
+    /// 解析本 turn 的压缩阈值（token 数）。`None` = 本 turn 不主动压缩。
+    fn compact_threshold(&self) -> Option<u64> {
+        if let Some(explicit) = self.config.compact_threshold_tokens {
+            return Some(explicit);
+        }
+        let ratio = self.config.compact_ratio?;
+        let context_window = self.provider.model_info(&self.config.model)?.context_window?;
+        // ratio 落在 (0, 1]；context_window * ratio 向下取整。
+        let threshold = (context_window as f64 * ratio).floor() as u64;
+        (threshold > 0).then_some(threshold)
     }
 
     /// 返回成功拿到的流 + 成功时的 attempt 号（供 run_inner 发 LlmCallFinished）。
@@ -1253,6 +1295,25 @@ fn add_usage(a: Usage, b: Usage) -> Usage {
             b.cache_creation_input_tokens,
         ),
     }
+}
+
+/// 一次 LLM 调用的「真实输入 token」= `input + cache_read + cache_creation`。
+/// 对齐 Claude Code 的 `getTokenCountFromUsage`：缓存命中/创建的部分也都进了
+/// 模型输入侧，必须计入。任一字段 `None` 视为 0；三项全 `None` 则返回 `None`
+/// （provider 没报输入量，无法作为基线）。
+fn real_input_tokens(usage: &Usage) -> Option<u64> {
+    let input = usage.input_tokens;
+    let cache_read = usage.cache_read_input_tokens;
+    let cache_creation = usage.cache_creation_input_tokens;
+    if input.is_none() && cache_read.is_none() && cache_creation.is_none() {
+        return None;
+    }
+    Some(
+        input
+            .unwrap_or(0)
+            .saturating_add(cache_read.unwrap_or(0))
+            .saturating_add(cache_creation.unwrap_or(0)),
+    )
 }
 
 fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {

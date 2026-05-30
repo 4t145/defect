@@ -822,6 +822,7 @@ pub(crate) struct TurnSection {
     pub(crate) system_prompt: Option<String>,
     pub(crate) request_limit: Option<u32>,
     pub(crate) compact_threshold_tokens: Option<u64>,
+    pub(crate) compact_ratio: Option<f64>,
     pub(crate) max_llm_retries: Option<u32>,
     pub(crate) max_concurrent_tools: Option<usize>,
 }

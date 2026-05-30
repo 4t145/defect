@@ -14,7 +14,7 @@ use defect_agent::llm::{
     ProtocolId, ProviderError, ProviderInfo, ProviderStream, ThinkingEcho,
 };
 use defect_agent::session::{
-    AgentCore, AgentError, DefaultAgentCore, SessionCapabilitiesConfig, SessionInitError,
+    AgentCore, AgentError, DefaultAgentCore, Frontend, SessionCapabilitiesConfig, SessionInitError,
     TurnConfig, WebSearchCapabilityConfig, WebSearchCapabilityMode, new_session_id,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
@@ -122,6 +122,7 @@ async fn delegate_with_unsupported_provider_fails_session_init() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await;
 
@@ -155,6 +156,7 @@ async fn delegate_with_supported_provider_creates_session() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("create session");
@@ -184,6 +186,7 @@ async fn disabled_mode_succeeds_regardless_of_provider() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("disabled mode should always succeed");

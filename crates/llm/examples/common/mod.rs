@@ -20,7 +20,7 @@ use defect_agent::fs::{FsBackend, NoopFsBackend};
 use defect_agent::llm::{LlmProvider, SamplingParams, ThinkingConfig, Usage};
 use defect_agent::policy::{OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
-    AgentCore, DefaultAgentCore, Session, StaticToolRegistry, ToolRegistry, TurnConfig,
+    AgentCore, DefaultAgentCore, Frontend, Session, StaticToolRegistry, ToolRegistry, TurnConfig,
     new_session_id,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
@@ -147,6 +147,7 @@ pub async fn build_session(
         vec![],
         Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
         Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+        Frontend::Headless,
     )
     .await
     .expect("create session")

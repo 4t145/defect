@@ -257,6 +257,9 @@ fn build_effective_config(
     if let Some(compact_threshold_tokens) = config.turn.compact_threshold_tokens {
         turn.compact_threshold_tokens = Some(compact_threshold_tokens);
     }
+    if let Some(compact_ratio) = config.turn.compact_ratio {
+        turn.compact_ratio = Some(compact_ratio);
+    }
     if let Some(max_llm_retries) = config.turn.max_llm_retries {
         turn.max_llm_retries = max_llm_retries;
     }

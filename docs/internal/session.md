@@ -137,18 +137,35 @@ ACP 反向 request `session/request_permission` 是 acp 桥接层自己发出去
 pub trait History: Send + Sync {
     fn append(&self, msg: Message);
     fn snapshot(&self) -> Vec<Message>;
+    fn replace(&self, messages: Vec<Message>);
+    fn record_input_tokens(&self, tokens: u64);
     fn token_estimate(&self) -> Option<u64>;
-    fn compact(&self) -> BoxFuture<'_, Result<CompactionReport, BoxError>>;
 }
 ```
 
-为什么 v0 就抽 trait（即便实现简单）：
+**History 是纯存储 + token 计量，压缩编排不在这里。** 早先把 `compact()` 设在
+trait 上是设计错位——摘要要调 LLM，存储抽象够不到 provider。改为：trait 提供
+`replace`（整体回写）与 `record_input_tokens`（喂真实用量），压缩的「选边界 → 调
+LLM 摘要 → 重建消息列表」放在 turn 主循环（见 [`turn-loop.md`](./turn-loop.md) §4 与
+`crates/agent/src/session/turn/compact.rs`）。这与 codex / opencode / Claude Code 三家
+一致：摘要编排都在 session/turn 层而非消息存储里。
 
-- **压缩、token 计数、resume 三件事都需要钩子**，不抽 trait 这些钩子会以裸函数四散在主循环里，后续重构成本高
-- **不同 provider 的 token 估算逻辑不同**（Anthropic 有专门的 `count_tokens` 端点；OpenAI 多用 tiktoken）—— 注入策略而不是写死
+为什么仍抽 trait：
+
+- **token 计数 / resume 仍需钩子**，不抽 trait 会以裸函数四散在主循环里
 - **测试**：`MockHistory` 比改具体 struct 字段更可控
 
-v0 的具体实现：`VecHistory { Mutex<Vec<Message>> }`，`token_estimate` 返回 `None`，`compact` 返回 `CompactionReport { tokens_before: 0, tokens_after: 0 }`（no-op）。所有钩子都已就位，等真做压缩时只需要换实现。
+### token 估算（`VecHistory`）
+
+不引入 tokenizer 依赖（对齐 opencode：trigger 用真实 usage，内部估算用字符启发式）。
+`token_estimate` 两段拼接：
+
+- **基线**：上一次 LLM 调用回报的真实输入 token（`input + cache_read +
+  cache_creation`），由主循环每次调用后经 `record_input_tokens` 喂入——最准的一段
+- **增量**：基线之后 `append` 的消息按 `chars/4` 估算累加（图片记 ~2000 常量）
+
+`replace`（压缩后回写）会清空基线，等下一次真实调用回报；基线缺失时（新建 / 刚
+replace）整份 snapshot 走字符启发式兜底，空历史返回 `None`。
 
 ## 5. 事件流：mpsc bounded + fan-out
 

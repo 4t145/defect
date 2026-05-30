@@ -1,0 +1,376 @@
+//! 上下文压缩编排。
+//!
+//! 压缩**不**在 [`crate::session::History`] 里做——摘要要调 LLM，存储抽象够不到
+//! provider。所以编排放在 turn 主循环这层（对齐 codex `compact.rs` /
+//! opencode `compaction.ts` / Claude Code `services/compact`）。
+//!
+//! 一次压缩：
+//! 1. [`select_boundary`]：把历史切成「待摘要前缀 head」+「原样保留尾部 tail」。
+//!    边界**对齐到轮次起点**（真实 user 消息），保证 tail 以合法 user 轮开头、
+//!    且绝不切散 `tool_use`↔`tool_result` 配对（两个 wire codec 都不校验配对，
+//!    必须由我们自己保证，详见 `crates/llm/src/protocol/*`）。
+//! 2. [`summarize`]：用当前 provider/model 对 head 跑一次「只产文本」的子请求，
+//!    要求按固定结构化模板输出摘要；检出旧摘要时走增量合并。
+//! 3. 重建历史：`[合成 assistant 摘要消息] ++ tail`，经 [`History::replace`] 回写。
+//!
+//! 失败（无安全边界 / provider 出错 / 摘要为空 / 取消）一律**最佳努力**降级：
+//! 跳过本次压缩、不杀 turn——大不了下一次真实调用自己撞上下文上限。
+
+use futures::StreamExt;
+
+use crate::llm::{
+    CompletionRequest, HostedCapabilities, Message, MessageContent, ProviderChunk, Role,
+    SamplingParams, StopReason, ThinkingConfig, ToolChoice, ToolResultBody,
+};
+use crate::session::history::estimate_message_tokens;
+use crate::session::{CompactionReport, TurnError};
+
+use super::TurnRunner;
+
+/// 保留尾部的 token 预算下限 / 上限（对齐 opencode 的 2k–8k）。
+const MIN_TAIL_TOKENS: u64 = 2_000;
+const MAX_TAIL_TOKENS: u64 = 8_000;
+
+/// head 中单条 tool_result 喂给摘要模型时截断到的字符上限——避免一份巨型工具
+/// 输出把摘要请求本身撑爆（对齐 opencode `toolOutputMaxChars: 2000`）。
+const TOOL_RESULT_MAX_CHARS: usize = 2_000;
+
+/// 合成摘要消息的自描述前缀。既给摘要模型一个语境，也让**后续压缩**能识别出
+/// 「这条是上一轮的压缩摘要」从而走增量合并、不把它当普通历史重复保留。
+pub(super) const SUMMARY_PREFIX: &str =
+    "[Compacted context summary — earlier conversation was condensed to save context.]";
+
+/// 摘要子请求的 system prompt（固定）。
+const SUMMARIZER_SYSTEM: &str = "\
+You are a context-summarization assistant for a coding agent session. You are given the \
+earlier part of a conversation that is about to be dropped to free up context. Summarize \
+ONLY what you are given. The newest turns are kept verbatim outside your summary, so focus \
+on older context that still matters for continuing the work.
+
+If a <previous-summary> block is present, treat it as the current anchored summary and UPDATE \
+it: keep still-true facts, drop stale ones, merge in new facts. Always follow the exact \
+section structure the user asks for, keep every section even if empty, preserve exact file \
+paths / identifiers / commands / error strings, and prefer terse bullets over prose. Do not \
+answer or continue the task itself, and do not mention that you are summarizing. Respond in \
+the same language as the conversation.";
+
+/// 结构化摘要模板（user prompt 末尾追加）。
+const SUMMARY_TEMPLATE: &str = "\
+Summarize the conversation above into the following Markdown structure. Keep every heading \
+even if a section is empty (write `(none)`):
+
+## Goal
+The user's overall objective and the current concrete task.
+
+## Constraints & Preferences
+Hard requirements, user preferences, and conventions to respect.
+
+## Progress
+### Done
+### In Progress
+### Blocked
+
+## Key Decisions
+Important choices made and why.
+
+## Next Steps
+Concrete, ordered next actions to continue the work.
+
+## Key Context
+Critical facts, data, snippets, or references needed to continue.
+
+## Relevant Files
+`path` — why it matters (one per line).";
+
+/// 执行一次压缩。返回 `Ok(Some(report))` 表示压缩成功（调用方据此发
+/// `ContextCompressed` 事件）；`Ok(None)` 表示本次最佳努力跳过。
+pub(super) async fn run(
+    runner: &TurnRunner<'_>,
+    threshold: u64,
+) -> Result<Option<CompactionReport>, TurnError> {
+    let messages = runner.history.snapshot();
+    let tail_budget = (threshold / 4).clamp(MIN_TAIL_TOKENS, MAX_TAIL_TOKENS);
+
+    let Some(boundary) = select_boundary(&messages, tail_budget) else {
+        tracing::warn!(
+            messages = messages.len(),
+            tail_budget,
+            "compaction skipped: no safe turn boundary to summarize before"
+        );
+        return Ok(None);
+    };
+
+    let (head, tail) = messages.split_at(boundary);
+    let prev_summary = extract_previous_summary(head);
+
+    let Some(summary) = summarize(runner, head, prev_summary.as_deref()).await else {
+        // summarize 内部已 warn（取消 / provider 错 / 空摘要）。
+        return Ok(None);
+    };
+
+    let tokens_before = estimate_total(&messages);
+
+    let summary_msg = Message {
+        role: Role::Assistant,
+        content: vec![MessageContent::Text {
+            text: format!("{SUMMARY_PREFIX}\n{summary}"),
+        }]
+        .into(),
+    };
+    let mut rebuilt = Vec::with_capacity(tail.len() + 1);
+    rebuilt.push(summary_msg);
+    rebuilt.extend(tail.iter().cloned());
+
+    let tokens_after = estimate_total(&rebuilt);
+    runner.history.replace(rebuilt);
+
+    tracing::info!(
+        boundary,
+        head_messages = head.len(),
+        tail_messages = tail.len(),
+        tokens_before,
+        tokens_after,
+        "context compacted"
+    );
+
+    Ok(Some(CompactionReport {
+        tokens_before,
+        tokens_after,
+    }))
+}
+
+/// 选保留边界：返回**第一条要保留**的消息下标（tail 起点）。
+///
+/// - 「轮次起点」= role==User 且至少含一个非 `ToolResult` 内容块的消息
+///   （即真实用户输入，而非工具结果回填消息）。
+/// - 从最新轮次向旧走，按字符启发式累加 tail 体积，整轮保留直到超 `tail_budget`。
+/// - 边界必须 `> 0`（head 非空才有得摘要）。若全程只有一个轮次（最新轮次起点
+///   就是 0）→ 返回 `None`（没有更早的历史可摘要）。
+/// - 若连最新一个轮次都超预算（单个超长轮次），仍把该轮次起点作为边界（不在
+///   user 消息内部切），把它之前的统统摘要掉——前提是该起点 `> 0`。
+fn select_boundary(messages: &[Message], tail_budget: u64) -> Option<usize> {
+    let turn_starts: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| is_turn_start(m))
+        .map(|(i, _)| i)
+        .collect();
+
+    let last_start = *turn_starts.last()?;
+    // 只有一个轮次（或最新轮次就在开头）→ 无更早历史可摘要。
+    if last_start == 0 {
+        return None;
+    }
+
+    // 从最新轮次起点向旧累加；记录「仍能装下且 >0」的最旧起点。
+    let mut best: Option<usize> = None;
+    let mut acc: u64 = 0;
+    let mut next_boundary = messages.len();
+    for &start in turn_starts.iter().rev() {
+        acc = acc.saturating_add(estimate_range(messages, start, next_boundary));
+        next_boundary = start;
+        if start == 0 {
+            break;
+        }
+        if acc <= tail_budget {
+            best = Some(start);
+        } else {
+            break;
+        }
+    }
+
+    // best 命中 → 用它；否则连最新轮次都超预算，回退到最新轮次起点
+    // （last_start 已确认 > 0）。
+    Some(best.unwrap_or(last_start))
+}
+
+/// 是否「轮次起点」：真实用户输入消息。
+fn is_turn_start(msg: &Message) -> bool {
+    msg.role == Role::User
+        && msg
+            .content
+            .iter()
+            .any(|c| !matches!(c, MessageContent::ToolResult { .. }))
+}
+
+fn estimate_range(messages: &[Message], start: usize, end: usize) -> u64 {
+    messages
+        .iter()
+        .take(end)
+        .skip(start)
+        .map(estimate_message_tokens)
+        .fold(0u64, u64::saturating_add)
+}
+
+fn estimate_total(messages: &[Message]) -> u64 {
+    messages
+        .iter()
+        .map(estimate_message_tokens)
+        .fold(0u64, u64::saturating_add)
+}
+
+/// 在 head 里找上一轮的压缩摘要（以 [`SUMMARY_PREFIX`] 起头的 assistant 文本），
+/// 返回其正文（去掉前缀）。用于增量合并。
+fn extract_previous_summary(head: &[Message]) -> Option<String> {
+    head.iter()
+        .filter(|m| m.role == Role::Assistant)
+        .find_map(|m| {
+            m.content.iter().find_map(|c| match c {
+                MessageContent::Text { text } => text
+                    .strip_prefix(SUMMARY_PREFIX)
+                    .map(|rest| rest.trim_start().to_string()),
+                _ => None,
+            })
+        })
+}
+
+/// 对 head 跑一次「只产文本」的摘要子请求，返回摘要正文。
+/// 任何失败（取消 / provider 错 / 空）→ `None`（调用方降级跳过）。
+async fn summarize(
+    runner: &TurnRunner<'_>,
+    head: &[Message],
+    prev_summary: Option<&str>,
+) -> Option<String> {
+    let mut messages: Vec<Message> = head.iter().map(prepare_head_message).collect();
+    messages.push(Message {
+        role: Role::User,
+        content: vec![MessageContent::Text {
+            text: build_prompt(prev_summary),
+        }]
+        .into(),
+    });
+
+    let req = CompletionRequest {
+        model: runner.config.model.clone(),
+        system: Some(SUMMARIZER_SYSTEM.into()),
+        messages,
+        // 带上 tools schema 让 head 里的 tool_use/tool_result 历史在 wire 上合法，
+        // 但 tool_choice=None 禁止摘要模型真去调工具——它只该产文本。
+        tools: runner.tools.schemas(),
+        tool_choice: ToolChoice::None,
+        sampling: SamplingParams {
+            // 摘要不需要思考链，关掉省 token。
+            thinking: ThinkingConfig::Disabled,
+            ..runner.config.sampling.clone()
+        },
+        hosted_capabilities: HostedCapabilities::default(),
+    };
+
+    let mut stream = match runner.provider.complete(req, runner.cancel.clone()).await {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::warn!(error = %err, "compaction summarize failed: provider error");
+            return None;
+        }
+    };
+
+    let mut text = String::new();
+    loop {
+        tokio::select! {
+            biased;
+            () = runner.cancel.cancelled() => {
+                tracing::warn!("compaction summarize cancelled");
+                return None;
+            }
+            next = stream.next() => match next {
+                None => break,
+                Some(Ok(ProviderChunk::TextDelta { text: delta })) => text.push_str(&delta),
+                Some(Ok(ProviderChunk::Stop { reason })) => {
+                    if matches!(reason, StopReason::Refusal) {
+                        tracing::warn!("compaction summarize refused by model");
+                        return None;
+                    }
+                    // 其余 chunk（thinking / tool_use / usage / message_start）忽略。
+                }
+                Some(Ok(_)) => {}
+                Some(Err(err)) => {
+                    tracing::warn!(error = %err, "compaction summarize failed: stream error");
+                    return None;
+                }
+            }
+        }
+    }
+
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        tracing::warn!("compaction summarize produced empty summary");
+        return None;
+    }
+    Some(text)
+}
+
+/// 拼摘要 user prompt：检出旧摘要则前置 `<previous-summary>` 增量块。
+fn build_prompt(prev_summary: Option<&str>) -> String {
+    match prev_summary {
+        Some(prev) => format!(
+            "Update the anchored summary below with the new conversation history.\n\n\
+             <previous-summary>\n{prev}\n</previous-summary>\n\n{SUMMARY_TEMPLATE}"
+        ),
+        None => SUMMARY_TEMPLATE.to_string(),
+    }
+}
+
+/// 把 head 里的一条消息整备成喂摘要模型的形态：截断超长 tool_result、剥离图片。
+fn prepare_head_message(msg: &Message) -> Message {
+    let content: Vec<MessageContent> = msg
+        .content
+        .iter()
+        .map(|c| match c {
+            MessageContent::ToolResult {
+                tool_use_id,
+                output,
+                is_error,
+            } => MessageContent::ToolResult {
+                tool_use_id: tool_use_id.clone(),
+                output: truncate_tool_output(output),
+                is_error: *is_error,
+            },
+            // 图片对文本摘要无意义且占带宽——换成占位文本。
+            MessageContent::Image { .. } => MessageContent::Text {
+                text: "[image omitted from summary]".to_string(),
+            },
+            other => other.clone(),
+        })
+        .collect();
+    Message {
+        role: msg.role,
+        content: content.into(),
+    }
+}
+
+fn truncate_tool_output(output: &ToolResultBody) -> ToolResultBody {
+    match output {
+        ToolResultBody::Text { text } => ToolResultBody::Text {
+            text: truncate_chars(text, TOOL_RESULT_MAX_CHARS),
+        },
+        ToolResultBody::Json { value } => {
+            let s = value.to_string();
+            if s.len() <= TOOL_RESULT_MAX_CHARS {
+                ToolResultBody::Json {
+                    value: value.clone(),
+                }
+            } else {
+                // 超长 JSON 降级成截断后的文本——摘要只需大意，不需结构完整。
+                ToolResultBody::Text {
+                    text: truncate_chars(&s, TOOL_RESULT_MAX_CHARS),
+                }
+            }
+        }
+    }
+}
+
+/// 按**字符边界**截断（不在多字节 UTF-8 中间切），超长则补省略标注。
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let kept: String = s.chars().take(max_chars).collect();
+    format!("{kept}\n…[truncated for summary]")
+}
+
+// 显式 `#[path]`：本文件经 turn.rs 的 `#[path]` 加载，其嵌套 mod 默认会落到
+// `session/turn/`（即解析成 turn.rs 自己的 test.rs），与父模块冲突。指明路径，
+// 让本模块的测试落在 `session/turn/compact/test.rs`。
+#[cfg(test)]
+#[path = "compact/test.rs"]
+mod test;

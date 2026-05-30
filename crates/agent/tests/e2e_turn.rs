@@ -24,8 +24,8 @@ use defect_agent::llm::{
 };
 use defect_agent::policy::{AskWritesPolicy, OpenPolicy, SandboxPolicy};
 use defect_agent::session::{
-    AgentCore, DefaultAgentCore, LoadedSession, Session, SessionCreateInfo, SessionLoader,
-    SessionObserver, StaticToolRegistry, ToolRegistry, TurnConfig, new_session_id,
+    AgentCore, DefaultAgentCore, Frontend, LoadedSession, Session, SessionCreateInfo,
+    SessionLoader, SessionObserver, StaticToolRegistry, ToolRegistry, TurnConfig, new_session_id,
 };
 use defect_agent::shell::{NoopShellBackend, ShellBackend};
 use defect_agent::tool::{
@@ -266,6 +266,7 @@ async fn full_turn_with_one_tool_call() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("create session");
@@ -380,6 +381,7 @@ async fn second_run_turn_while_first_in_flight_returns_in_progress() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("session");
@@ -441,6 +443,7 @@ async fn load_session_restores_history_for_next_turn() {
             loaded.info.id.clone(),
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("load session");
@@ -485,6 +488,7 @@ async fn load_session_triggers_observers() {
             loaded.info.id.clone(),
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("load session");
@@ -567,6 +571,7 @@ async fn ask_writes_policy_runs_after_allow_once() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("create session");
@@ -666,6 +671,7 @@ async fn ask_writes_policy_cancel_during_ask_returns_cancelled() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("session");
@@ -760,6 +766,7 @@ async fn deny_during_ask_completes_cleanly() {
             vec![],
             Arc::new(NoopFsBackend) as Arc<dyn FsBackend>,
             Arc::new(NoopShellBackend) as Arc<dyn ShellBackend>,
+            Frontend::Headless,
         )
         .await
         .expect("session");
